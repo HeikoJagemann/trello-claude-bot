@@ -5,6 +5,8 @@ app:
   trello:
     api-key: DEIN_TRELLO_API_KEY
     api-token: DEIN_TRELLO_API_TOKEN
+    board-id: DEINE_BOARD_ID          # Trello Board-ID (aus der Board-URL)
+    poll-interval-ms: 30000           # Polling-Intervall in Millisekunden (Standard: 30s)
     base-url: https://api.trello.com/1
 
   claude:
