@@ -8,6 +8,8 @@ app:
     board-id: ${TRELLO_BOARD_ID}
     poll-interval-ms: 30000
     backlog-list-name: Backlog          # Karten in dieser Liste werden analysiert (Story Points)
+    refinement-label-name: Refinement   # Nur Karten mit diesem Label werden im Backlog verarbeitet
+    ready-label-name: Ready             # Dieses Label wird nach der Analyse gesetzt
     base-url: https://api.trello.com/1
 
   claude:

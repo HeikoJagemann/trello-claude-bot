@@ -19,21 +19,27 @@ public class AppProperties {
         private String baseUrl        = "https://api.trello.com/1";
         private String boardId;
         private long   pollIntervalMs  = 30_000;
-        private String backlogListName = "Backlog";
+        private String backlogListName      = "Backlog";
+        private String refinementLabelName = "Refinement";
+        private String readyLabelName      = "Ready";
 
-        public String getApiKey()         { return apiKey; }
-        public String getApiToken()       { return apiToken; }
-        public String getBaseUrl()        { return baseUrl; }
-        public String getBoardId()        { return boardId; }
-        public long   getPollIntervalMs() { return pollIntervalMs; }
-        public String getBacklogListName(){ return backlogListName; }
+        public String getApiKey()              { return apiKey; }
+        public String getApiToken()            { return apiToken; }
+        public String getBaseUrl()             { return baseUrl; }
+        public String getBoardId()             { return boardId; }
+        public long   getPollIntervalMs()      { return pollIntervalMs; }
+        public String getBacklogListName()     { return backlogListName; }
+        public String getRefinementLabelName() { return refinementLabelName; }
+        public String getReadyLabelName()      { return readyLabelName; }
 
-        public void setApiKey(String apiKey)                  { this.apiKey = apiKey; }
-        public void setApiToken(String apiToken)              { this.apiToken = apiToken; }
-        public void setBaseUrl(String baseUrl)                { this.baseUrl = baseUrl; }
-        public void setBoardId(String boardId)                { this.boardId = boardId; }
-        public void setPollIntervalMs(long ms)                { this.pollIntervalMs = ms; }
-        public void setBacklogListName(String name)           { this.backlogListName = name; }
+        public void setApiKey(String apiKey)                       { this.apiKey = apiKey; }
+        public void setApiToken(String apiToken)                   { this.apiToken = apiToken; }
+        public void setBaseUrl(String baseUrl)                     { this.baseUrl = baseUrl; }
+        public void setBoardId(String boardId)                     { this.boardId = boardId; }
+        public void setPollIntervalMs(long ms)                     { this.pollIntervalMs = ms; }
+        public void setBacklogListName(String name)                { this.backlogListName = name; }
+        public void setRefinementLabelName(String name)            { this.refinementLabelName = name; }
+        public void setReadyLabelName(String name)                 { this.readyLabelName = name; }
     }
 
     public static class ClaudeCode {

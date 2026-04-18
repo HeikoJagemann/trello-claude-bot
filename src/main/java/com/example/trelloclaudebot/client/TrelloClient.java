@@ -2,6 +2,9 @@ package com.example.trelloclaudebot.client;
 
 import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
+import com.example.trelloclaudebot.dto.trello.TrelloLabel;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -31,6 +34,8 @@ public class TrelloClient {
         this.props     = props;
     }
 
+    // ── Polling ───────────────────────────────────────────────────────────────
+
     /**
      * Ruft alle relevanten Actions des konfigurierten Boards ab, die nach {@code since} aufgetreten sind.
      *
@@ -38,7 +43,7 @@ public class TrelloClient {
      * @return Liste der Actions, neueste zuerst
      */
     public List<TrelloAction> fetchRecentActions(Instant since) {
-        String boardId = props.getTrello().getBoardId();
+        String boardId  = props.getTrello().getBoardId();
         String sinceStr = DateTimeFormatter.ISO_INSTANT.format(since);
 
         log.debug("Polling Trello Board {} seit {}", boardId, sinceStr);
@@ -69,6 +74,129 @@ public class TrelloClient {
         }
     }
 
+    // ── Labels ────────────────────────────────────────────────────────────────
+
+    /**
+     * Gibt alle Labels zurück, die aktuell auf der angegebenen Karte sind.
+     */
+    public List<TrelloLabel> fetchCardLabels(String cardId) {
+        try {
+            CardLabelsResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}")
+                            .queryParam("fields", "labels")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId))
+                    .retrieve()
+                    .bodyToMono(CardLabelsResponse.class)
+                    .block();
+
+            return response != null && response.labels != null ? response.labels : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Karten-Labels {}: HTTP {} – {}",
+                    cardId, e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Karten-Labels {}", cardId, e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Gibt alle Labels zurück, die auf dem konfigurierten Board definiert sind.
+     * Wird genutzt, um Label-IDs anhand des Namens nachzuschlagen.
+     */
+    public List<TrelloLabel> fetchBoardLabels() {
+        String boardId = props.getTrello().getBoardId();
+
+        try {
+            List<TrelloLabel> labels = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/boards/{boardId}/labels")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(boardId))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<List<TrelloLabel>>() {})
+                    .block();
+
+            return labels != null ? labels : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Board-Labels: HTTP {} – {}",
+                    e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Board-Labels", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Entfernt ein Label von einer Karte.
+     *
+     * @param cardId  ID der Karte
+     * @param labelId ID des zu entfernenden Labels
+     */
+    public void removeLabelFromCard(String cardId, String labelId) {
+        log.info("Entferne Label {} von Karte {}", labelId, cardId);
+
+        try {
+            webClient.delete()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}/idLabels/{labelId}")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId, labelId))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+            log.info("Label {} erfolgreich von Karte {} entfernt.", labelId, cardId);
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Entfernen von Label {}: HTTP {} – {}",
+                    labelId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Entfernen von Label {} von Karte {}", labelId, cardId, e);
+        }
+    }
+
+    /**
+     * Fügt ein Label zu einer Karte hinzu.
+     *
+     * @param cardId  ID der Karte
+     * @param labelId ID des hinzuzufügenden Labels
+     */
+    public void addLabelToCard(String cardId, String labelId) {
+        log.info("Füge Label {} zu Karte {} hinzu", labelId, cardId);
+
+        try {
+            webClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}/idLabels")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .queryParam("value", labelId)
+                            .build(cardId))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+            log.info("Label {} erfolgreich zu Karte {} hinzugefügt.", labelId, cardId);
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Hinzufügen von Label {}: HTTP {} – {}",
+                    labelId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Hinzufügen von Label {} zu Karte {}", labelId, cardId, e);
+        }
+    }
+
+    // ── Kommentar ─────────────────────────────────────────────────────────────
+
     /**
      * Fügt einen Kommentar zur Trello-Karte hinzu.
      *
@@ -98,5 +226,14 @@ public class TrelloClient {
         } catch (Exception e) {
             log.error("Unerwarteter Fehler beim Trello Kommentar schreiben", e);
         }
+    }
+
+    // ── Hilfsobjekte ──────────────────────────────────────────────────────────
+
+    /** Wrapper für den GET /cards/{id}?fields=labels Response. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class CardLabelsResponse {
+        @JsonProperty("labels")
+        List<TrelloLabel> labels;
     }
 }
