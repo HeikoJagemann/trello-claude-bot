@@ -162,10 +162,24 @@ public class TaskOrchestratorService {
         return props.getTrello().getBacklogListName().equalsIgnoreCase(listName);
     }
 
+    /**
+     * Ermittelt den Listen-Namen aus der Action-Data.
+     *
+     * Trello befüllt {@code data.list} nur bei Karten-Bewegungen (createCard, moveCard).
+     * Bei updateCard-Actions (Label/Beschreibung ändern) fehlt das Feld – in diesem Fall
+     * wird die Liste über {@code data.card.idList} nachgeladen.
+     */
     private String extractListName(TrelloActionData data) {
         if (data.getList() != null && data.getList().getName() != null) {
             return data.getList().getName();
         }
+        // Fallback: idList aus der Karte → Listenname per API nachladen
+        if (data.getCard() != null && data.getCard().getIdList() != null) {
+            String listName = trelloClient.fetchListName(data.getCard().getIdList());
+            log.debug("Listenname per API nachgeladen: '{}'", listName);
+            return listName;
+        }
+        log.warn("Listenname konnte nicht ermittelt werden – weder data.list noch data.card.idList vorhanden.");
         return "";
     }
 }

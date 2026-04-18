@@ -74,6 +74,41 @@ public class TrelloClient {
         }
     }
 
+    // ── Listen ───────────────────────────────────────────────────────────────
+
+    /**
+     * Gibt den Namen der Liste zurück, in der eine Karte liegt.
+     * Wird als Fallback genutzt, wenn die Action-Data kein {@code list}-Objekt enthält
+     * (z.B. bei updateCard-Actions für Label- oder Beschreibungsänderungen).
+     *
+     * @param listId ID der Trello-Liste
+     * @return Listenname oder leerer String bei Fehler
+     */
+    public String fetchListName(String listId) {
+        try {
+            ListNameResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/lists/{listId}")
+                            .queryParam("fields", "name")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(listId))
+                    .retrieve()
+                    .bodyToMono(ListNameResponse.class)
+                    .block();
+
+            return response != null && response.name != null ? response.name : "";
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden des Listennamens für {}: HTTP {} – {}",
+                    listId, e.getStatusCode(), e.getResponseBodyAsString());
+            return "";
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden des Listennamens für {}", listId, e);
+            return "";
+        }
+    }
+
     // ── Labels ────────────────────────────────────────────────────────────────
 
     /**
@@ -235,5 +270,12 @@ public class TrelloClient {
     private static class CardLabelsResponse {
         @JsonProperty("labels")
         List<TrelloLabel> labels;
+    }
+
+    /** Wrapper für den GET /lists/{id}?fields=name Response. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class ListNameResponse {
+        @JsonProperty("name")
+        String name;
     }
 }
