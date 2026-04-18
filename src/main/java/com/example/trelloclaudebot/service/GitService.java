@@ -43,6 +43,27 @@ public class GitService {
     }
 
     /**
+     * Prüft ob es nicht-committete Änderungen gibt und commitet diese automatisch.
+     * Dient als Fallback falls Claude Code vergisst zu committen.
+     *
+     * @param commitMessage Commit-Message für den Auto-Commit
+     * @return true wenn ein Commit erstellt wurde, false wenn nichts zu committen war
+     */
+    public boolean commitIfNeeded(String commitMessage) {
+        List<String> status = runGitCommand("status", "--porcelain");
+        if (status.isEmpty()) {
+            log.debug("GitService: Keine nicht-committeten Änderungen vorhanden.");
+            return false;
+        }
+
+        log.warn("GitService: {} nicht-committete Datei(en) gefunden – erstelle Auto-Commit.", status.size());
+        runGitCommand("add", "-A");
+        List<String> result = runGitCommand("commit", "-m", commitMessage);
+        log.info("GitService: Auto-Commit erstellt: {}", result);
+        return true;
+    }
+
+    /**
      * Führt {@code git push} im Repo aus.
      *
      * @return true wenn erfolgreich

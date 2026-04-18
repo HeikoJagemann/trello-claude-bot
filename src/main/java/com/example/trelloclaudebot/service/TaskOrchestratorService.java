@@ -222,6 +222,9 @@ public class TaskOrchestratorService {
         String prompt  = promptBuilder.buildCodePrompt(enrichedTask);
         String summary = claudeCodeRunner.run(enrichedTask, prompt);
 
+        // Fallback: falls Claude Code nicht selbst commitet, Auto-Commit erstellen
+        gitService.commitIfNeeded("Implementierung: " + task.getTitle());
+
         // Git push + neue Commits ermitteln
         boolean pushed = gitService.push();
         List<String> newCommits = gitService.getCommitsSince(headBefore);

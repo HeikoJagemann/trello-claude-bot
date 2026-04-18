@@ -73,6 +73,9 @@ public class PromptBuilder {
                 für Maven, `dotnet build` für .NET, `./gradlew compileJava` für Gradle). \
                 Schlägt der Build fehl, behebe den Fehler bevor du weitermachst oder abschließt. \
                 Liefere keinen Code ab, der nicht kompiliert.
+                - Committe deine Änderungen am Ende mit aussagekräftiger Commit-Message: \
+                `git add -A && git commit -m "<kurze Beschreibung der Änderung>"`. \
+                Ohne Commit werden die Änderungen nicht deployed.
                 - Fasse am Ende kurz zusammen, was du geändert hast (max. 5 Bullet Points)
 
                 ---
