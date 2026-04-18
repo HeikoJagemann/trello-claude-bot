@@ -56,9 +56,11 @@ public class PromptBuilder {
      * direkt im Repo.
      */
     public String buildCodePrompt(InternalTask task) {
+        String akSection = buildAkzeptanzkriterienSection(task);
+
         return """
-                Du bist ein erfahrener Java-Softwareentwickler. Du arbeitest in einem bestehenden \
-                Spring Boot Projekt. Nutze deine verfügbaren Tools (Read, Grep, Glob, Edit, Write, Bash), \
+                Du bist ein erfahrener Softwareentwickler. Du arbeitest in einem bestehenden Projekt. \
+                Nutze deine verfügbaren Tools (Read, Grep, Glob, Edit, Write, Bash), \
                 um dir zunächst einen Überblick über den relevanten Code zu verschaffen, \
                 und implementiere dann die folgende Aufgabe vollständig und produktionsreif.
 
@@ -66,6 +68,7 @@ public class PromptBuilder {
                 - Lies zuerst die relevanten Dateien, bevor du Änderungen vornimmst
                 - Halte dich an den bestehenden Code-Stil und die vorhandene Architektur
                 - Schreibe keinen Pseudocode und keine Platzhalter – der Code muss direkt lauffähig sein
+                - Alle Akzeptanzkriterien müssen erfüllt sein bevor du fertig bist
                 - Fasse am Ende kurz zusammen, was du geändert hast (max. 5 Bullet Points)
 
                 ---
@@ -76,9 +79,20 @@ public class PromptBuilder {
 
                 **Beschreibung:**
                 %s
+                %s
                 """.formatted(
                 task.getTitle(),
-                task.getDescription().isBlank() ? "(keine Beschreibung angegeben)" : task.getDescription()
+                task.getDescription().isBlank() ? "(keine Beschreibung angegeben)" : task.getDescription(),
+                akSection
         );
+    }
+
+    private String buildAkzeptanzkriterienSection(InternalTask task) {
+        if (task.getAkzeptanzkriterien().isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("\n**Definition of Done (Akzeptanzkriterien):**\n");
+        task.getAkzeptanzkriterien().forEach(k -> sb.append("- ").append(k).append("\n"));
+        return sb.toString();
     }
 }

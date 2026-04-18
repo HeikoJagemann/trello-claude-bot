@@ -1,6 +1,7 @@
 package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.client.TrelloClient.TrelloChecklistRead;
 import com.example.trelloclaudebot.client.TrelloClient.TrelloCustomField;
 import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.internal.AnalysisResult;
@@ -185,11 +186,49 @@ public class TaskOrchestratorService {
     private void processImplementation(InternalTask task) {
         log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
 
-        String prompt  = promptBuilder.buildCodePrompt(task);
-        String summary = claudeCodeRunner.run(task, prompt);
+        // Akzeptanzkriterien aus Trello-Checklisten laden
+        List<String> akzeptanzkriterien = fetchAkzeptanzkriterien(task.getCardId());
+        if (!akzeptanzkriterien.isEmpty()) {
+            log.info("{} Akzeptanzkriterien für Karte {} geladen.", akzeptanzkriterien.size(), task.getCardId());
+        }
+
+        InternalTask enrichedTask = new InternalTask(
+                task.getCardId(),
+                task.getTitle(),
+                task.getDescription(),
+                task.getActionType(),
+                task.getListName(),
+                akzeptanzkriterien
+        );
+
+        String prompt  = promptBuilder.buildCodePrompt(enrichedTask);
+        String summary = claudeCodeRunner.run(enrichedTask, prompt);
 
         trelloClient.addComment(task.getCardId(), summary);
         log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
+    }
+
+    /**
+     * Holt alle Checklisten-Items der Karte und gibt sie als flache Liste zurück.
+     * Mehrere Checklisten werden zusammengeführt (mit Checklisten-Name als Prefix falls > 1).
+     */
+    private List<String> fetchAkzeptanzkriterien(String cardId) {
+        List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(cardId);
+        if (checklists.isEmpty()) return java.util.Collections.emptyList();
+
+        boolean multipleChecklists = checklists.size() > 1;
+        List<String> items = new java.util.ArrayList<>();
+
+        for (TrelloChecklistRead checklist : checklists) {
+            for (TrelloChecklistRead.CheckItem item : checklist.getCheckItems()) {
+                if (multipleChecklists) {
+                    items.add("[" + checklist.getName() + "] " + item.getName());
+                } else {
+                    items.add(item.getName());
+                }
+            }
+        }
+        return items;
     }
 
     // ── Label-Verwaltung ──────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import org.springframework.util.MultiValueMap;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -233,6 +234,35 @@ public class TrelloClient {
                     labelId, e.getStatusCode(), e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Unerwarteter Fehler beim Hinzufügen von Label {} zu Karte {}", labelId, cardId, e);
+        }
+    }
+
+    // ── Checklisten lesen ────────────────────────────────────────────────────
+
+    /**
+     * Gibt alle Checklisten einer Karte zurück, jeweils mit ihren Items.
+     */
+    public List<TrelloChecklistRead> fetchCardChecklists(String cardId) {
+        try {
+            List<TrelloChecklistRead> checklists = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}/checklists")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<List<TrelloChecklistRead>>() {})
+                    .block();
+
+            return checklists != null ? checklists : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Checklisten für Karte {}: HTTP {} – {}",
+                    cardId, e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Checklisten für Karte {}", cardId, e);
+            return Collections.emptyList();
         }
     }
 
@@ -470,6 +500,36 @@ public class TrelloClient {
     private static class ChecklistResponse {
         @JsonProperty("id")
         String id;
+    }
+
+    // ── Öffentliche DTOs ─────────────────────────────────────────────────────
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TrelloChecklistRead {
+        @JsonProperty("id")
+        private String id;
+
+        @JsonProperty("name")
+        private String name;
+
+        @JsonProperty("checkItems")
+        private List<CheckItem> checkItems = new ArrayList<>();
+
+        public String         getId()         { return id; }
+        public String         getName()       { return name; }
+        public List<CheckItem> getCheckItems() { return checkItems; }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class CheckItem {
+            @JsonProperty("name")
+            private String name;
+
+            @JsonProperty("state")
+            private String state; // "incomplete" oder "complete"
+
+            public String getName()  { return name; }
+            public String getState() { return state; }
+        }
     }
 
     // ── Öffentliches DTO für Custom Fields ───────────────────────────────────
