@@ -27,17 +27,20 @@ public class TaskOrchestratorService {
     private final ClaudeCodeRunner      claudeCodeRunner;
     private final AnalysisResultParser  analysisResultParser;
     private final TrelloClient          trelloClient;
+    private final GitService            gitService;
     private final AppProperties         props;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeCodeRunner claudeCodeRunner,
                                    AnalysisResultParser analysisResultParser,
                                    TrelloClient trelloClient,
+                                   GitService gitService,
                                    AppProperties props) {
         this.promptBuilder        = promptBuilder;
         this.claudeCodeRunner     = claudeCodeRunner;
         this.analysisResultParser = analysisResultParser;
         this.trelloClient         = trelloClient;
+        this.gitService           = gitService;
         this.props                = props;
     }
 
@@ -190,11 +193,8 @@ public class TaskOrchestratorService {
     private void processImplementation(InternalTask task) {
         log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
 
-        // Akzeptanzkriterien aus Trello-Checklisten laden
+        // Nur noch offene Akzeptanzkriterien laden (bereits erledigte werden gefiltert)
         List<String> akzeptanzkriterien = fetchAkzeptanzkriterien(task.getCardId());
-        if (!akzeptanzkriterien.isEmpty()) {
-            log.info("{} Akzeptanzkriterien für Karte {} geladen.", akzeptanzkriterien.size(), task.getCardId());
-        }
 
         InternalTask enrichedTask = new InternalTask(
                 task.getCardId(),
@@ -205,10 +205,19 @@ public class TaskOrchestratorService {
                 akzeptanzkriterien
         );
 
+        String headBefore = gitService.getCurrentHead();
+        log.debug("HEAD vor Implementierung: {}", headBefore);
+
         String prompt  = promptBuilder.buildCodePrompt(enrichedTask);
         String summary = claudeCodeRunner.run(enrichedTask, prompt);
 
-        trelloClient.addComment(task.getCardId(), summary);
+        // Git push + neue Commits ermitteln
+        boolean pushed = gitService.push();
+        List<String> newCommits = gitService.getCommitsSince(headBefore);
+
+        // Kommentar zusammenbauen: Summary + Commits
+        String comment = buildImplementationComment(summary, pushed, newCommits);
+        trelloClient.addComment(task.getCardId(), comment);
         log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
 
         // Alle Akzeptanzkriterien abhaken
@@ -226,6 +235,11 @@ public class TaskOrchestratorService {
      * Holt alle Checklisten-Items der Karte und gibt sie als flache Liste zurück.
      * Mehrere Checklisten werden zusammengeführt (mit Checklisten-Name als Prefix falls > 1).
      */
+    /**
+     * Holt alle noch nicht abgehakten Checklisten-Items der Karte.
+     * Bereits erledigte Items (state=complete) werden übersprungen –
+     * der Bot soll nur offene Punkte bearbeiten.
+     */
     private List<String> fetchAkzeptanzkriterien(String cardId) {
         List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(cardId);
         if (checklists.isEmpty()) return java.util.Collections.emptyList();
@@ -235,6 +249,10 @@ public class TaskOrchestratorService {
 
         for (TrelloChecklistRead checklist : checklists) {
             for (TrelloChecklistRead.CheckItem item : checklist.getCheckItems()) {
+                if ("complete".equals(item.getState())) {
+                    log.debug("Akzeptanzkriterium bereits erledigt, wird übersprungen: '{}'", item.getName());
+                    continue;
+                }
                 if (multipleChecklists) {
                     items.add("[" + checklist.getName() + "] " + item.getName());
                 } else {
@@ -242,7 +260,25 @@ public class TaskOrchestratorService {
                 }
             }
         }
+
+        log.info("{} offene Akzeptanzkriterien für Karte {} geladen.", items.size(), cardId);
         return items;
+    }
+
+    private String buildImplementationComment(String summary, boolean pushed, List<String> commits) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(summary.isBlank() ? "✅ Implementierung abgeschlossen." : summary.trim());
+
+        if (!commits.isEmpty()) {
+            sb.append("\n\n---\n**Commits:**\n");
+            commits.forEach(c -> sb.append("- `").append(c).append("`\n"));
+        }
+
+        if (!pushed) {
+            sb.append("\n\n⚠️ `git push` fehlgeschlagen – bitte manuell pushen.");
+        }
+
+        return sb.toString();
     }
 
     // ── Label-Verwaltung ──────────────────────────────────────────────────────
