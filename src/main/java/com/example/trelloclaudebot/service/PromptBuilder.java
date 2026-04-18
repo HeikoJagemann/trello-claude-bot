@@ -69,6 +69,10 @@ public class PromptBuilder {
                 - Halte dich an den bestehenden Code-Stil und die vorhandene Architektur
                 - Schreibe keinen Pseudocode und keine Platzhalter – der Code muss direkt lauffähig sein
                 - Alle Akzeptanzkriterien müssen erfüllt sein bevor du fertig bist
+                - Kompiliere nach jeder Änderung das betroffene Projekt (z.B. `mvn compile -q` \
+                für Maven, `dotnet build` für .NET, `./gradlew compileJava` für Gradle). \
+                Schlägt der Build fehl, behebe den Fehler bevor du weitermachst oder abschließt. \
+                Liefere keinen Code ab, der nicht kompiliert.
                 - Fasse am Ende kurz zusammen, was du geändert hast (max. 5 Bullet Points)
 
                 ---
