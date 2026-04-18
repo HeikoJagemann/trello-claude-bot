@@ -13,6 +13,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import org.springframework.http.MediaType;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -243,14 +247,21 @@ public class TrelloClient {
     public void addComment(String cardId, String comment) {
         log.info("Schreibe Kommentar auf Trello-Karte {}", cardId);
 
+        // "text" wird als Form-Body gesendet, NICHT als Query-Parameter.
+        // Grund: der Kommentartext kann geschweifte Klammern enthalten (z.B. JSON-Fehlertexte),
+        // die Spring's URI-Builder sonst als Template-Variablen interpretiert.
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("text", comment);
+
         try {
             webClient.post()
                     .uri(uriBuilder -> uriBuilder
                             .path("/cards/{cardId}/actions/comments")
                             .queryParam("key",   props.getTrello().getApiKey())
                             .queryParam("token", props.getTrello().getApiToken())
-                            .queryParam("text",  comment)
                             .build(cardId))
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .bodyValue(form)
                     .retrieve()
                     .toBodilessEntity()
                     .block();
