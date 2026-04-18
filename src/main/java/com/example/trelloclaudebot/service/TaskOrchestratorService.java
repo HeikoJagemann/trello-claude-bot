@@ -1,6 +1,5 @@
 package com.example.trelloclaudebot.service;
 
-import com.example.trelloclaudebot.client.ClaudeClient;
 import com.example.trelloclaudebot.client.TrelloClient;
 import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
@@ -21,18 +20,15 @@ public class TaskOrchestratorService {
     private static final Logger log = LoggerFactory.getLogger(TaskOrchestratorService.class);
 
     private final PromptBuilder     promptBuilder;
-    private final ClaudeClient      claudeClient;
     private final ClaudeCodeRunner  claudeCodeRunner;
     private final TrelloClient      trelloClient;
     private final AppProperties     props;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
-                                   ClaudeClient claudeClient,
                                    ClaudeCodeRunner claudeCodeRunner,
                                    TrelloClient trelloClient,
                                    AppProperties props) {
         this.promptBuilder    = promptBuilder;
-        this.claudeClient     = claudeClient;
         this.claudeCodeRunner = claudeCodeRunner;
         this.trelloClient     = trelloClient;
         this.props            = props;
@@ -42,7 +38,7 @@ public class TaskOrchestratorService {
      * Routing-Logik basierend auf der Trello-Liste:
      *
      * Backlog  → nur wenn Label "Refinement" gesetzt:
-     *            Claude API analysiert + schätzt Story Points,
+     *            Claude Code CLI analysiert + schätzt Story Points,
      *            danach Label "Refinement" entfernen, Label "Ready" setzen
      * Andere   → Claude Code CLI implementiert direkt im Repo, Summary als Kommentar
      */
@@ -81,7 +77,7 @@ public class TaskOrchestratorService {
     /**
      * Backlog-Flow:
      * 1. Prüft, ob die Karte das "Refinement"-Label trägt. Falls nicht → überspringen.
-     * 2. Claude API analysiert die Aufgabe und schätzt Story Points.
+     * 2. Claude Code CLI analysiert die Aufgabe und schätzt Story Points.
      * 3. Ergebnis als Kommentar auf die Karte.
      * 4. Label "Refinement" entfernen, Label "Ready" setzen.
      */
@@ -98,12 +94,12 @@ public class TaskOrchestratorService {
             return;
         }
 
-        log.info("Modus: Analyse + Story Points via Claude API (Liste: '{}', Label: '{}')",
+        log.info("Modus: Analyse + Story Points via Claude Code CLI (Liste: '{}', Label: '{}')",
                 task.getListName(), refinementName);
 
         // Schritt 2 & 3 – Analyse + Kommentar
         String prompt   = promptBuilder.buildAnalysisPrompt(task);
-        String response = claudeClient.sendPrompt(prompt);
+        String response = claudeCodeRunner.run(task, prompt);
         trelloClient.addComment(task.getCardId(), response);
 
         // Schritt 4 – Labels tauschen

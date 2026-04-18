@@ -6,11 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AppProperties {
 
     private final Trello      trello      = new Trello();
-    private final Claude      claude      = new Claude();
     private final ClaudeCode  claudeCode  = new ClaudeCode();
 
     public Trello     getTrello()     { return trello; }
-    public Claude     getClaude()     { return claude; }
     public ClaudeCode getClaudeCode() { return claudeCode; }
 
     public static class Trello {
@@ -50,20 +48,4 @@ public class AppProperties {
         public void   setRepoPath(String p)   { this.repoPath = p; }
     }
 
-    public static class Claude {
-        private String apiKey;
-        private String baseUrl   = "https://api.anthropic.com";
-        private String model     = "claude-sonnet-4-6";
-        private int    maxTokens = 4096;
-
-        public String getApiKey()    { return apiKey; }
-        public String getBaseUrl()   { return baseUrl; }
-        public String getModel()     { return model; }
-        public int    getMaxTokens() { return maxTokens; }
-
-        public void setApiKey(String apiKey)    { this.apiKey = apiKey; }
-        public void setBaseUrl(String baseUrl)  { this.baseUrl = baseUrl; }
-        public void setModel(String model)      { this.model = model; }
-        public void setMaxTokens(int maxTokens) { this.maxTokens = maxTokens; }
-    }
 }

@@ -10,17 +10,6 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
 public class WebClientConfig {
 
     @Bean
-    @Qualifier("claudeWebClient")
-    public WebClient claudeWebClient(AppProperties props) {
-        return WebClient.builder()
-                .baseUrl(props.getClaude().getBaseUrl())
-                .defaultHeader("x-api-key",        props.getClaude().getApiKey())
-                .defaultHeader("anthropic-version", "2023-06-01")
-                .defaultHeader("Content-Type",      "application/json")
-                .build();
-    }
-
-    @Bean
     @Qualifier("trelloWebClient")
     public WebClient trelloWebClient(AppProperties props) {
         // VALUES_ONLY: Query-Parameter-Werte werden URL-enkodiert, aber NICHT als

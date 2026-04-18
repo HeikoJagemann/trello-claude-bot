@@ -12,12 +12,6 @@ app:
     ready-label-name: Ready             # Dieses Label wird nach der Analyse gesetzt
     base-url: https://api.trello.com/1
 
-  claude:
-    api-key: ${CLAUDE_API_KEY}
-    base-url: https://api.anthropic.com
-    model: claude-sonnet-4-6
-    max-tokens: 4096
-
   claude-code:
     repo-path: ${CLAUDE_CODE_REPO_PATH:.}
 
