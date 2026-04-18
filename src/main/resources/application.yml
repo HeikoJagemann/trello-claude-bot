@@ -9,7 +9,7 @@ app:
     poll-interval-ms: 30000
     backlog-list-name: Backlog          # Karten in dieser Liste werden analysiert (Story Points)
     refinement-label-name: Refinement   # Nur Karten mit diesem Label werden im Backlog verarbeitet
-    ready-label-name: Ready             # Dieses Label wird nach der Analyse gesetzt
+    ready-label-name: Refined            # Dieses Label wird nach der Analyse gesetzt
     story-points-field-name: Story Points  # Name des Custom Fields für Story Points
     base-url: https://api.trello.com/1
 
