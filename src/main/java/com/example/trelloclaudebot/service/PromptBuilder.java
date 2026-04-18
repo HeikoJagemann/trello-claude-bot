@@ -7,27 +7,48 @@ import org.springframework.stereotype.Service;
 public class PromptBuilder {
 
     /**
-     * Erstellt einen strukturierten Prompt aus dem InternalTask.
-     * Kann später durch Template-Engine oder komplexere Logik ersetzt werden.
+     * Erstellt einen strukturierten Code-Generierungs-Prompt.
+     * Die Antwort von Claude wird von der ApplyEngine geparst:
+     * jeder FILE-Block wird direkt als Datei auf Disk geschrieben.
      */
     public String build(InternalTask task) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Du bist ein hilfreicher Assistent für Projektmanagement.\n\n");
-        sb.append("Eine neue Aufgabe wurde in Trello erstellt oder aktualisiert:\n\n");
-        sb.append("**Titel:** ").append(task.getTitle()).append("\n");
+        return """
+                Du bist ein erfahrener Java Softwareentwickler mit Fokus auf sauberen, produktionsreifen Code.
 
-        if (task.getDescription() != null && !task.getDescription().isBlank()) {
-            sb.append("**Beschreibung:**\n").append(task.getDescription()).append("\n");
-        } else {
-            sb.append("**Beschreibung:** (keine Beschreibung angegeben)\n");
-        }
+                Deine Aufgabe ist es, Code so zu erzeugen, dass er automatisch von einem System verarbeitet \
+                und direkt in Dateien geschrieben werden kann.
 
-        sb.append("\nBitte analysiere diese Aufgabe und gib:\n");
-        sb.append("1. Eine kurze Einschätzung des Aufwands (Klein / Mittel / Groß)\n");
-        sb.append("2. Mögliche Teilaufgaben oder nächste Schritte\n");
-        sb.append("3. Eventuelle Rückfragen oder Risiken\n\n");
-        sb.append("Antworte präzise und auf Deutsch.");
+                WICHTIG: Dein Output wird von einer Apply Engine geparst. Halte dich strikt an das Format.
 
-        return sb.toString();
+                ---
+
+                AUSGABEFORMAT (STRICT – KEINE ABWEICHUNG):
+
+                Für jede Datei:
+
+                FILE: <relativer/pfad/zur/datei>
+                ```<sprache>
+                <vollständiger code der datei>
+                ```
+
+                Regeln:
+                - Gib NUR die FILE-Blöcke aus, keinen erklärenden Text davor oder danach
+                - Jeder Block beginnt exakt mit "FILE:" in einer eigenen Zeile
+                - Der Pfad ist relativ zum Projektroot (z.B. src/main/java/com/example/Foo.java)
+                - Der Code ist vollständig und direkt ausführbar – keine Platzhalter, kein Pseudocode
+                - Wenn mehrere Dateien betroffen sind, gib alle nacheinander aus
+
+                ---
+
+                AUFGABE:
+
+                **Titel:** %s
+
+                **Beschreibung:**
+                %s
+                """.formatted(
+                task.getTitle(),
+                task.getDescription().isBlank() ? "(keine Beschreibung angegeben)" : task.getDescription()
+        );
     }
 }

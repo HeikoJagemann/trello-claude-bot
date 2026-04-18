@@ -3,17 +3,20 @@ server:
 
 app:
   trello:
-    api-key: DEIN_TRELLO_API_KEY
-    api-token: DEIN_TRELLO_API_TOKEN
-    board-id: DEINE_BOARD_ID          # Trello Board-ID (aus der Board-URL)
-    poll-interval-ms: 30000           # Polling-Intervall in Millisekunden (Standard: 30s)
+    api-key: ${TRELLO_API_KEY}
+    api-token: ${TRELLO_API_TOKEN}
+    board-id: ${TRELLO_BOARD_ID}
+    poll-interval-ms: 30000
     base-url: https://api.trello.com/1
 
   claude:
-    api-key: DEIN_ANTHROPIC_API_KEY
+    api-key: ${CLAUDE_API_KEY}
     base-url: https://api.anthropic.com
     model: claude-sonnet-4-6
-    max-tokens: 1024
+    max-tokens: 4096
+
+  apply:
+    base-path: ./generated
 
 logging:
   level:

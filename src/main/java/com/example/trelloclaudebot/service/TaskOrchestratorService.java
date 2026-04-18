@@ -2,12 +2,15 @@ package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.ClaudeClient;
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.dto.internal.ApplyResult;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
 import com.example.trelloclaudebot.dto.trello.TrelloCardData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 public class TaskOrchestratorService {
@@ -16,20 +19,27 @@ public class TaskOrchestratorService {
 
     private final PromptBuilder promptBuilder;
     private final ClaudeClient  claudeClient;
+    private final ApplyEngine   applyEngine;
     private final TrelloClient  trelloClient;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeClient claudeClient,
+                                   ApplyEngine applyEngine,
                                    TrelloClient trelloClient) {
         this.promptBuilder = promptBuilder;
         this.claudeClient  = claudeClient;
+        this.applyEngine   = applyEngine;
         this.trelloClient  = trelloClient;
     }
 
     /**
-     * Verarbeitet eine einzelne Trello-Action.
-     * Extrahiert Kartendaten, generiert einen Prompt, ruft Claude auf
-     * und schreibt die Antwort als Kommentar zurück auf die Karte.
+     * Vollständiger Verarbeitungsfluss für eine Trello-Action:
+     *
+     * 1. Kartendaten → InternalTask
+     * 2. Strukturierten Prompt bauen
+     * 3. Claude API aufrufen (erwartet FILE-Blöcke im Response)
+     * 4. ApplyEngine parst Response und schreibt Dateien
+     * 5. Summary als Kommentar auf die Karte schreiben
      */
     public void process(TrelloAction action) {
         if (action.getData() == null) {
@@ -52,9 +62,21 @@ public class TaskOrchestratorService {
 
         log.info("Verarbeite Task: {}", task);
 
-        String prompt   = promptBuilder.build(task);
-        String response = claudeClient.sendPrompt(prompt);
+        // Schritt 1: Prompt mit strukturiertem Ausgabeformat bauen
+        String prompt = promptBuilder.build(task);
 
-        trelloClient.addComment(task.getCardId(), "🤖 **KI-Analyse:**\n\n" + response);
+        // Schritt 2: Claude API aufrufen
+        String claudeResponse = claudeClient.sendPrompt(prompt);
+
+        // Schritt 3: FILE-Blöcke parsen und auf Disk schreiben
+        List<ApplyResult> results = applyEngine.apply(claudeResponse);
+
+        // Schritt 4: Summary als Trello-Kommentar
+        String summary = applyEngine.buildSummary(results);
+        trelloClient.addComment(task.getCardId(), summary);
+
+        log.info("Task {} abgeschlossen. {} Datei(en) geschrieben.",
+                task.getCardId(),
+                results.stream().filter(r -> r.getStatus() == ApplyResult.Status.WRITTEN).count());
     }
 }

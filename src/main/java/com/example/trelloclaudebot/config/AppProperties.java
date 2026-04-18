@@ -7,9 +7,11 @@ public class AppProperties {
 
     private final Trello trello = new Trello();
     private final Claude claude = new Claude();
+    private final Apply  apply  = new Apply();
 
     public Trello getTrello() { return trello; }
     public Claude getClaude() { return claude; }
+    public Apply  getApply()  { return apply; }
 
     public static class Trello {
         private String apiKey;
@@ -31,11 +33,19 @@ public class AppProperties {
         public void setPollIntervalMs(long ms)         { this.pollIntervalMs = ms; }
     }
 
+    public static class Apply {
+        /** Basisverzeichnis, in das generierte Dateien geschrieben werden. */
+        private String basePath = ".";
+
+        public String getBasePath()          { return basePath; }
+        public void   setBasePath(String p)  { this.basePath = p; }
+    }
+
     public static class Claude {
         private String apiKey;
         private String baseUrl   = "https://api.anthropic.com";
         private String model     = "claude-sonnet-4-6";
-        private int    maxTokens = 1024;
+        private int    maxTokens = 4096;
 
         public String getApiKey()    { return apiKey; }
         public String getBaseUrl()   { return baseUrl; }
