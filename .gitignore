@@ -1,6 +1,7 @@
 target/
 *.class
 *.jar
-.idea/
+.idea/*
+!.idea/runConfigurations/
 *.iml
 **/application-local.yml
