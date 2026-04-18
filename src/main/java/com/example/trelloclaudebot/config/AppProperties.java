@@ -19,8 +19,10 @@ public class AppProperties {
         private long   pollIntervalMs  = 30_000;
         private String backlogListName      = "Backlog";
         private String refinementLabelName  = "Refinement";
-        private String readyLabelName       = "Ready";
+        private String readyLabelName       = "Refined";
         private String storyPointsFieldName = "Story Points";
+        private String sprintListName       = "Sprint";
+        private String qaListName           = "QA";
 
         public String getApiKey()              { return apiKey; }
         public String getApiToken()            { return apiToken; }
@@ -31,6 +33,8 @@ public class AppProperties {
         public String getRefinementLabelName()  { return refinementLabelName; }
         public String getReadyLabelName()       { return readyLabelName; }
         public String getStoryPointsFieldName() { return storyPointsFieldName; }
+        public String getSprintListName()       { return sprintListName; }
+        public String getQaListName()           { return qaListName; }
 
         public void setApiKey(String apiKey)                       { this.apiKey = apiKey; }
         public void setApiToken(String apiToken)                   { this.apiToken = apiToken; }
@@ -41,6 +45,8 @@ public class AppProperties {
         public void setRefinementLabelName(String name)             { this.refinementLabelName = name; }
         public void setReadyLabelName(String name)                  { this.readyLabelName = name; }
         public void setStoryPointsFieldName(String name)            { this.storyPointsFieldName = name; }
+        public void setSprintListName(String name)                  { this.sprintListName = name; }
+        public void setQaListName(String name)                      { this.qaListName = name; }
     }
 
     public static class ClaudeCode {

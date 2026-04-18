@@ -1,6 +1,7 @@
 package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.client.TrelloClient.BoardList;
 import com.example.trelloclaudebot.client.TrelloClient.TrelloChecklistRead;
 import com.example.trelloclaudebot.client.TrelloClient.TrelloCustomField;
 import com.example.trelloclaudebot.config.AppProperties;
@@ -73,8 +74,11 @@ public class TaskOrchestratorService {
 
         if (isBacklog(listName)) {
             processAnalysis(task);
-        } else {
+        } else if (isSprint(listName)) {
             processImplementation(task);
+        } else {
+            log.info("Liste '{}' wird nicht verarbeitet – nur '{}' und '{}' sind aktiv.",
+                    listName, props.getTrello().getBacklogListName(), props.getTrello().getSprintListName());
         }
     }
 
@@ -206,6 +210,16 @@ public class TaskOrchestratorService {
 
         trelloClient.addComment(task.getCardId(), summary);
         log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
+
+        // Alle Akzeptanzkriterien abhaken
+        List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(task.getCardId());
+        if (!checklists.isEmpty()) {
+            log.info("Hake alle Checklisteneinträge auf Karte {} ab.", task.getCardId());
+            trelloClient.checkAllCheckItems(task.getCardId(), checklists);
+        }
+
+        // Karte in QA-Liste verschieben
+        moveCardToQa(task.getCardId());
     }
 
     /**
@@ -258,6 +272,26 @@ public class TaskOrchestratorService {
 
     private boolean isBacklog(String listName) {
         return props.getTrello().getBacklogListName().equalsIgnoreCase(listName);
+    }
+
+    private boolean isSprint(String listName) {
+        return props.getTrello().getSprintListName().equalsIgnoreCase(listName);
+    }
+
+    private void moveCardToQa(String cardId) {
+        String qaListName = props.getTrello().getQaListName();
+        List<BoardList> lists = trelloClient.fetchBoardLists();
+        Optional<BoardList> qaList = lists.stream()
+                .filter(l -> qaListName.equalsIgnoreCase(l.getName()))
+                .findFirst();
+
+        if (qaList.isEmpty()) {
+            log.warn("QA-Liste '{}' nicht auf dem Board gefunden – Karte {} bleibt in Sprint.", qaListName, cardId);
+            return;
+        }
+
+        trelloClient.moveCardToList(cardId, qaList.get().getId());
+        log.info("Karte {} in Liste '{}' verschoben.", cardId, qaListName);
     }
 
     private String extractListName(TrelloActionData data) {

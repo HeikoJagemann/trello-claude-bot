@@ -479,6 +479,110 @@ public class TrelloClient {
         }
     }
 
+    // ── Listen-Verwaltung ─────────────────────────────────────────────────────
+
+    /**
+     * Gibt alle Listen des konfigurierten Boards zurück.
+     * Wird genutzt, um die ID einer Liste anhand ihres Namens zu ermitteln.
+     */
+    public List<BoardList> fetchBoardLists() {
+        String boardId = props.getTrello().getBoardId();
+
+        try {
+            List<BoardList> lists = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/boards/{boardId}/lists")
+                            .queryParam("fields", "id,name")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(boardId))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<List<BoardList>>() {})
+                    .block();
+
+            return lists != null ? lists : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Board-Listen: HTTP {} – {}",
+                    e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Board-Listen", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Verschiebt eine Karte in die angegebene Liste.
+     *
+     * @param cardId ID der Karte
+     * @param listId ID der Zielliste
+     */
+    public void moveCardToList(String cardId, String listId) {
+        log.info("Verschiebe Karte {} in Liste {}", cardId, listId);
+
+        try {
+            webClient.put()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}")
+                            .queryParam("key",    props.getTrello().getApiKey())
+                            .queryParam("token",  props.getTrello().getApiToken())
+                            .build(cardId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(java.util.Map.of("idList", listId))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+            log.info("Karte {} erfolgreich in Liste {} verschoben.", cardId, listId);
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Verschieben von Karte {}: HTTP {} – {}",
+                    cardId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Verschieben von Karte {}", cardId, e);
+        }
+    }
+
+    /**
+     * Setzt alle CheckItems in den übergebenen Checklisten auf "complete".
+     *
+     * @param cardId     ID der Karte (benötigt für die API-URL)
+     * @param checklists Checklisten, deren Items abgehakt werden sollen
+     */
+    public void checkAllCheckItems(String cardId, List<TrelloChecklistRead> checklists) {
+        for (TrelloChecklistRead checklist : checklists) {
+            for (TrelloChecklistRead.CheckItem item : checklist.getCheckItems()) {
+                if ("complete".equals(item.getState())) {
+                    continue; // bereits abgehakt
+                }
+                markCheckItemComplete(cardId, checklist.getId(), item.getId());
+            }
+        }
+    }
+
+    private void markCheckItemComplete(String cardId, String checklistId, String checkItemId) {
+        try {
+            webClient.put()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}/checklist/{checklistId}/checkItem/{checkItemId}")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId, checklistId, checkItemId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(java.util.Map.of("state", "complete"))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Abhaken von CheckItem {}: HTTP {} – {}",
+                    checkItemId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Abhaken von CheckItem {}", checkItemId, e);
+        }
+    }
+
     // ── Hilfsobjekte ──────────────────────────────────────────────────────────
 
     /** Wrapper für den GET /cards/{id}?fields=labels Response. */
@@ -521,15 +625,33 @@ public class TrelloClient {
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class CheckItem {
+            @JsonProperty("id")
+            private String id;
+
             @JsonProperty("name")
             private String name;
 
             @JsonProperty("state")
             private String state; // "incomplete" oder "complete"
 
+            public String getId()    { return id; }
             public String getName()  { return name; }
             public String getState() { return state; }
         }
+    }
+
+    // ── Öffentliches DTO für Board-Listen ────────────────────────────────────
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class BoardList {
+        @JsonProperty("id")
+        private String id;
+
+        @JsonProperty("name")
+        private String name;
+
+        public String getId()   { return id; }
+        public String getName() { return name; }
     }
 
     // ── Öffentliches DTO für Custom Fields ───────────────────────────────────
