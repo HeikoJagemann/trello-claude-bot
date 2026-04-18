@@ -3,7 +3,6 @@ package com.example.trelloclaudebot.service;
 import com.example.trelloclaudebot.client.ClaudeClient;
 import com.example.trelloclaudebot.client.TrelloClient;
 import com.example.trelloclaudebot.config.AppProperties;
-import com.example.trelloclaudebot.dto.internal.ApplyResult;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
 import com.example.trelloclaudebot.dto.trello.TrelloActionData;
@@ -12,36 +11,34 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 @Service
 public class TaskOrchestratorService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskOrchestratorService.class);
 
-    private final PromptBuilder promptBuilder;
-    private final ClaudeClient  claudeClient;
-    private final ApplyEngine   applyEngine;
-    private final TrelloClient  trelloClient;
-    private final AppProperties props;
+    private final PromptBuilder     promptBuilder;
+    private final ClaudeClient      claudeClient;
+    private final ClaudeCodeRunner  claudeCodeRunner;
+    private final TrelloClient      trelloClient;
+    private final AppProperties     props;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeClient claudeClient,
-                                   ApplyEngine applyEngine,
+                                   ClaudeCodeRunner claudeCodeRunner,
                                    TrelloClient trelloClient,
                                    AppProperties props) {
-        this.promptBuilder = promptBuilder;
-        this.claudeClient  = claudeClient;
-        this.applyEngine   = applyEngine;
-        this.trelloClient  = trelloClient;
-        this.props         = props;
+        this.promptBuilder    = promptBuilder;
+        this.claudeClient     = claudeClient;
+        this.claudeCodeRunner = claudeCodeRunner;
+        this.trelloClient     = trelloClient;
+        this.props            = props;
     }
 
     /**
      * Routing-Logik basierend auf der Trello-Liste:
      *
-     * Backlog  → Analyse + Story-Point-Schätzung als Kommentar
-     * Andere   → Code-Generierung via ApplyEngine + Summary-Kommentar
+     * Backlog  → Claude API: Analyse + Story-Point-Schätzung als Kommentar
+     * Andere   → Claude Code CLI: implementiert direkt im Repo, Summary als Kommentar
      */
     public void process(TrelloAction action) {
         if (action.getData() == null) {
@@ -69,18 +66,18 @@ public class TaskOrchestratorService {
         if (isBacklog(listName)) {
             processAnalysis(task);
         } else {
-            processCodeGeneration(task);
+            processImplementation(task);
         }
     }
 
     // ── Analyse (Backlog) ─────────────────────────────────────────────────────
 
     /**
-     * Backlog-Flow: Claude analysiert die Aufgabe und schätzt Story Points.
-     * Ergebnis wird direkt als Kommentar auf die Karte geschrieben.
+     * Backlog-Flow: Claude API analysiert die Aufgabe und schätzt Story Points.
+     * Kein Repo-Zugriff nötig – reine Textanalyse.
      */
     private void processAnalysis(InternalTask task) {
-        log.info("Modus: Analyse + Story Points (Liste: '{}')", task.getListName());
+        log.info("Modus: Analyse + Story Points via Claude API (Liste: '{}')", task.getListName());
 
         String prompt   = promptBuilder.buildAnalysisPrompt(task);
         String response = claudeClient.sendPrompt(prompt);
@@ -89,24 +86,21 @@ public class TaskOrchestratorService {
         log.info("Analyse für Karte {} abgeschlossen.", task.getCardId());
     }
 
-    // ── Code-Generierung (alle anderen Listen) ────────────────────────────────
+    // ── Implementierung (alle anderen Listen) ─────────────────────────────────
 
     /**
-     * Code-Generierungs-Flow: Claude gibt FILE-Blöcke zurück,
-     * ApplyEngine schreibt sie auf Disk, Summary wird als Kommentar geschrieben.
+     * Implementierungs-Flow: Claude Code CLI arbeitet direkt im Repo.
+     * Hat nativen Zugriff auf alle Dateien via Read/Edit/Write/Bash-Tools.
+     * Die Ausgabe (Zusammenfassung der Änderungen) wird als Kommentar geschrieben.
      */
-    private void processCodeGeneration(InternalTask task) {
-        log.info("Modus: Code-Generierung (Liste: '{}')", task.getListName());
+    private void processImplementation(InternalTask task) {
+        log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
 
-        String prompt         = promptBuilder.buildCodePrompt(task);
-        String claudeResponse = claudeClient.sendPrompt(prompt);
-        List<ApplyResult> results = applyEngine.apply(claudeResponse);
-        String summary        = applyEngine.buildSummary(results);
+        String prompt  = promptBuilder.buildCodePrompt(task);
+        String summary = claudeCodeRunner.run(task, prompt);
 
         trelloClient.addComment(task.getCardId(), summary);
-        log.info("Code-Generierung für Karte {} abgeschlossen. {} Datei(en) geschrieben.",
-                task.getCardId(),
-                results.stream().filter(r -> r.getStatus() == ApplyResult.Status.WRITTEN).count());
+        log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
     }
 
     // ── Hilfsmethoden ─────────────────────────────────────────────────────────

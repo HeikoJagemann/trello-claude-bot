@@ -58,35 +58,23 @@ public class PromptBuilder {
     }
 
     /**
-     * Code-Generierungs-Prompt für alle anderen Listen.
-     * Claude gibt FILE-Blöcke zurück, die von der ApplyEngine verarbeitet werden.
+     * Code-Implementierungs-Prompt für alle Sprint-Listen.
+     * Wird direkt an Claude Code CLI übergeben – kein FILE:-Format nötig,
+     * Claude Code arbeitet über seine eigenen Tools (Read, Edit, Write, Bash, …)
+     * direkt im Repo.
      */
     public String buildCodePrompt(InternalTask task) {
         return """
-                Du bist ein erfahrener Java Softwareentwickler mit Fokus auf sauberen, produktionsreifen Code.
-
-                Deine Aufgabe ist es, Code so zu erzeugen, dass er automatisch von einem System verarbeitet \
-                und direkt in Dateien geschrieben werden kann.
-
-                WICHTIG: Dein Output wird von einer Apply Engine geparst. Halte dich strikt an das Format.
-
-                ---
-
-                AUSGABEFORMAT (STRICT – KEINE ABWEICHUNG):
-
-                Für jede Datei:
-
-                FILE: <relativer/pfad/zur/datei>
-                ```<sprache>
-                <vollständiger code der datei>
-                ```
+                Du bist ein erfahrener Java-Softwareentwickler. Du arbeitest in einem bestehenden \
+                Spring Boot Projekt. Nutze deine verfügbaren Tools (Read, Grep, Glob, Edit, Write, Bash), \
+                um dir zunächst einen Überblick über den relevanten Code zu verschaffen, \
+                und implementiere dann die folgende Aufgabe vollständig und produktionsreif.
 
                 Regeln:
-                - Gib NUR die FILE-Blöcke aus, keinen erklärenden Text davor oder danach
-                - Jeder Block beginnt exakt mit "FILE:" in einer eigenen Zeile
-                - Der Pfad ist relativ zum Projektroot (z.B. src/main/java/com/example/Foo.java)
-                - Der Code ist vollständig und direkt ausführbar – keine Platzhalter, kein Pseudocode
-                - Wenn mehrere Dateien betroffen sind, gib alle nacheinander aus
+                - Lies zuerst die relevanten Dateien, bevor du Änderungen vornimmst
+                - Halte dich an den bestehenden Code-Stil und die vorhandene Architektur
+                - Schreibe keinen Pseudocode und keine Platzhalter – der Code muss direkt lauffähig sein
+                - Fasse am Ende kurz zusammen, was du geändert hast (max. 5 Bullet Points)
 
                 ---
 

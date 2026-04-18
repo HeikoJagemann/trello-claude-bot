@@ -16,8 +16,8 @@ app:
     model: claude-sonnet-4-6
     max-tokens: 4096
 
-  apply:
-    base-path: ./generated
+  claude-code:
+    repo-path: ${CLAUDE_CODE_REPO_PATH:.}
 
 logging:
   level:

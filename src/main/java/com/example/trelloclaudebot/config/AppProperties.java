@@ -5,13 +5,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
 
-    private final Trello trello = new Trello();
-    private final Claude claude = new Claude();
-    private final Apply  apply  = new Apply();
+    private final Trello      trello      = new Trello();
+    private final Claude      claude      = new Claude();
+    private final ClaudeCode  claudeCode  = new ClaudeCode();
 
-    public Trello getTrello() { return trello; }
-    public Claude getClaude() { return claude; }
-    public Apply  getApply()  { return apply; }
+    public Trello     getTrello()     { return trello; }
+    public Claude     getClaude()     { return claude; }
+    public ClaudeCode getClaudeCode() { return claudeCode; }
 
     public static class Trello {
         private String apiKey;
@@ -36,12 +36,12 @@ public class AppProperties {
         public void setBacklogListName(String name)           { this.backlogListName = name; }
     }
 
-    public static class Apply {
-        /** Basisverzeichnis, in das generierte Dateien geschrieben werden. */
-        private String basePath = ".";
+    public static class ClaudeCode {
+        /** Pfad zum lokalen Repo-Verzeichnis, in dem Claude Code CLI ausgeführt wird. */
+        private String repoPath = ".";
 
-        public String getBasePath()          { return basePath; }
-        public void   setBasePath(String p)  { this.basePath = p; }
+        public String getRepoPath()           { return repoPath; }
+        public void   setRepoPath(String p)   { this.repoPath = p; }
     }
 
     public static class Claude {

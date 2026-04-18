@@ -1,53 +1,44 @@
 # Trello Claude Bot
 
-Ein Spring Boot Backend, das Trello-Karten automatisch per KI verarbeitet, daraus Code generiert und die erzeugten Dateien direkt auf Disk schreibt.
+Ein Spring Boot Backend, das Trello-Karten automatisch per KI verarbeitet.
 
-## Funktionsweise
+- **Backlog-Karten** → Claude API analysiert die Aufgabe und schätzt Story Points (Fibonacci)
+- **Sprint-Karten** → Claude Code CLI implementiert die Aufgabe direkt im lokalen Repo
+
+## Architektur
 
 ```
-Trello Board (Polling)
+Trello Board (Polling alle 30s)
         │
-        ▼  alle 30s
+        ▼
 TrelloPollingService
         │  neue createCard / updateCard Actions
         ▼
 TaskOrchestratorService
         │
-        ├─► PromptBuilder       → strukturierter Prompt (FILE:-Format)
+        ├─ Backlog ──► PromptBuilder ──► ClaudeClient (API)
+        │                                       │
+        │                               Analyse + Story Points
+        │                                       │
+        │                               TrelloClient → Kommentar
         │
-        ├─► ClaudeClient        → Claude API aufrufen
-        │
-        ├─► ApplyEngine         → FILE-Blöcke parsen, Dateien schreiben
-        │
-        └─► TrelloClient        → Summary als Kommentar auf die Karte
+        └─ Sprint  ──► PromptBuilder ──► ClaudeCodeRunner (CLI)
+                                                │
+                                        claude -p "..." im Repo-Verzeichnis
+                                        (liest/ändert Dateien direkt via Tools)
+                                                │
+                                        TrelloClient → Summary als Kommentar
 ```
 
-### Ablauf Schritt für Schritt
+### Warum Claude Code CLI statt API für Code-Aufgaben?
 
-1. `TrelloPollingService` pollt das konfigurierte Board alle 30 Sekunden
-2. Neue `createCard`- oder `updateCard`-Actions werden erkannt
-3. `PromptBuilder` generiert einen Prompt, der Claude anweist, Code im `FILE:`-Format zurückzugeben
-4. `ClaudeClient` ruft die Anthropic Messages API auf
-5. `ApplyEngine` parst die Antwort und schreibt jede erkannte Datei in das konfigurierte Zielverzeichnis
-6. `TrelloClient` schreibt einen Kommentar mit dem Ergebnis (✅ geschrieben / ❌ Fehler) zurück auf die Karte
+Die Claude API kennt nur das, was im Prompt steht. Sinnvolle Code-Generierung erfordert
+Kontext: bestehende Klassen, Architekturmuster, Imports, Konfiguration. Diesen Kontext
+manuell zusammenzustellen ist fehleranfällig und skaliert nicht.
 
-### Claude Ausgabeformat (Apply-Engine-kompatibel)
-
-Claude wird angewiesen, ausschließlich folgendes Format zurückzugeben:
-
-```
-FILE: src/main/java/com/example/MyService.java
-```java
-// vollständiger Dateiinhalt
-```
-
-FILE: src/main/java/com/example/MyController.java
-```java
-// vollständiger Dateiinhalt
-```
-```
-
-Die `ApplyEngine` erkennt alle `FILE:`-Blöcke per Regex und schreibt sie direkt ins konfigurierte `apply.base-path`.
+**Claude Code CLI löst das:** Es hat direkt Zugriff auf das Repo über seine nativen Tools
+(`Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`) und kann selbstständig den nötigen
+Kontext ermitteln, bevor es Änderungen vornimmt — genau wie ein Entwickler.
 
 ---
 
@@ -55,24 +46,29 @@ Die `ApplyEngine` erkennt alle `FILE:`-Blöcke per Regex und schreibt sie direkt
 
 - Java 17+
 - Maven 3.8+
+- [Claude Code CLI](https://claude.ai/code) installiert und im PATH (`claude --version`)
 - Trello API Key & Token ([hier holen](https://trello.com/power-ups/admin))
-- Anthropic API Key ([hier holen](https://console.anthropic.com))
+- Anthropic API Key für Analyse-Funktion ([hier holen](https://console.anthropic.com))
 
 ---
 
 ## Konfiguration
 
-Die `application.yml` verwendet Umgebungsvariablen. Für die lokale Entwicklung eine Datei `src/main/resources/application-local.yml` anlegen (wird nicht eingecheckt):
+Die `application.yml` verwendet Umgebungsvariablen. Für die lokale Entwicklung eine Datei
+`src/main/resources/application-local.yml` anlegen (wird nicht eingecheckt):
 
 ```yaml
 app:
   trello:
     api-key: DEIN_TRELLO_API_KEY
     api-token: DEIN_TRELLO_API_TOKEN
-    board-id: DEINE_BOARD_ID       # aus der URL: trello.com/b/BOARD_ID/...
+    board-id: DEINE_BOARD_ID        # aus der URL: trello.com/b/BOARD_ID/...
 
   claude:
     api-key: DEIN_ANTHROPIC_API_KEY
+
+  claude-code:
+    repo-path: /pfad/zum/lokalen/repo  # Verzeichnis, in dem Claude Code ausgeführt wird
 ```
 
 Alternativ als Umgebungsvariablen:
@@ -82,16 +78,18 @@ export TRELLO_API_KEY=...
 export TRELLO_API_TOKEN=...
 export TRELLO_BOARD_ID=...
 export CLAUDE_API_KEY=...
+export CLAUDE_CODE_REPO_PATH=/pfad/zum/repo
 ```
 
-### Weitere Optionen (`application.yml`)
+### Alle Konfigurationsoptionen
 
 | Property | Standard | Beschreibung |
 |----------|----------|-------------|
 | `app.trello.poll-interval-ms` | `30000` | Polling-Intervall in ms |
-| `app.claude.model` | `claude-sonnet-4-6` | Claude Modell |
-| `app.claude.max-tokens` | `4096` | Max. Tokens in der Antwort |
-| `app.apply.base-path` | `./generated` | Zielverzeichnis für generierte Dateien |
+| `app.trello.backlog-list-name` | `Backlog` | Name der Analyse-Liste (Story Points) |
+| `app.claude.model` | `claude-sonnet-4-6` | Claude Modell (für Analyse) |
+| `app.claude.max-tokens` | `4096` | Max. Tokens pro Analyse-Antwort |
+| `app.claude-code.repo-path` | `.` | Repo-Verzeichnis für Claude Code CLI |
 
 ---
 
@@ -106,7 +104,8 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=local"
 **Mit Umgebungsvariablen:**
 
 ```bash
-TRELLO_API_KEY=xxx TRELLO_API_TOKEN=yyy TRELLO_BOARD_ID=zzz CLAUDE_API_KEY=aaa \
+TRELLO_API_KEY=xxx TRELLO_API_TOKEN=yyy TRELLO_BOARD_ID=zzz \
+CLAUDE_API_KEY=aaa CLAUDE_CODE_REPO_PATH=/pfad/zum/repo \
   mvn spring-boot:run
 ```
 
@@ -127,20 +126,20 @@ Der Server startet auf Port `8080` (kein öffentlicher Endpunkt erforderlich).
 src/main/java/com/example/trelloclaudebot/
 ├── TrelloClaudeBotApplication.java
 ├── config/
-│   ├── AppProperties.java            # Typisierte Konfiguration (Trello, Claude, Apply)
+│   ├── AppProperties.java            # Typisierte Konfiguration (Trello, Claude, ClaudeCode)
 │   └── WebClientConfig.java          # WebClient Beans (Claude + Trello)
 ├── service/
 │   ├── TrelloPollingService.java     # @Scheduled Polling des Trello-Boards
-│   ├── TaskOrchestratorService.java  # Verarbeitungsfluss
-│   ├── PromptBuilder.java            # Strukturierter Code-Generierungs-Prompt
-│   └── ApplyEngine.java              # Parst FILE-Blöcke, schreibt Dateien
+│   ├── TaskOrchestratorService.java  # Routing: Backlog → API, Sprint → CLI
+│   ├── PromptBuilder.java            # Prompts für Analyse und Implementierung
+│   ├── ClaudeCodeRunner.java         # ProcessBuilder → claude -p "..." im Repo
+│   └── (ClaudeClient über API nur für Backlog-Analyse)
 ├── client/
-│   ├── ClaudeClient.java             # Anthropic Messages API
+│   ├── ClaudeClient.java             # Anthropic Messages API (Analyse)
 │   └── TrelloClient.java             # Trello REST API (Polling + Kommentar)
 └── dto/
     ├── internal/
-    │   ├── InternalTask.java         # Internes Task-Objekt
-    │   └── ApplyResult.java          # Ergebnis je geschriebener Datei (WRITTEN/SKIPPED/ERROR)
+    │   └── InternalTask.java         # Internes Task-Objekt
     ├── trello/                       # Trello Action DTOs
     └── claude/                       # Claude Request/Response DTOs
 ```
@@ -154,7 +153,7 @@ src/main/java/com/example/trelloclaudebot/
 | `createCard` | Neue Karte angelegt |
 | `updateCard` | Karte bearbeitet    |
 
-Alle anderen Events werden stillschweigend ignoriert. Die Liste ist in `TrelloPollingService` konfigurierbar.
+Alle anderen Events werden stillschweigend ignoriert.
 
 ---
 
@@ -162,14 +161,12 @@ Alle anderen Events werden stillschweigend ignoriert. Die Liste ist in `TrelloPo
 
 - API Keys werden **nicht** ins Repository eingecheckt — nur `${ENV_VAR}`-Platzhalter
 - `application-local.yml` ist in `.gitignore` eingetragen
-- `ApplyEngine` prüft jeden Pfad auf Directory-Traversal (`../`-Angriffe werden blockiert)
 
 ---
 
 ## Nächste Schritte
 
 - [ ] Asynchrone Verarbeitung (`@Async`) damit der Polling-Thread nicht blockiert
-- [ ] Konfigurierbare Prompts pro Board-Liste (z.B. "Backlog" → Code, "Analyse" → Review)
 - [ ] Persistenz: bereits verarbeitete Action-IDs speichern (verhindert Doppelverarbeitung nach Neustart)
+- [ ] Konfigurierbare Listen-Namen → Routing-Regeln (z.B. "Review" → Review-Prompt)
 - [ ] Docker-Support
-- [ ] Unit-Tests für `ApplyEngine` (Regex, Pfad-Validierung)
