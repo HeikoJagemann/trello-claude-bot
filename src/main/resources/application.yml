@@ -7,6 +7,7 @@ app:
     api-token: ${TRELLO_API_TOKEN}
     board-id: ${TRELLO_BOARD_ID}
     poll-interval-ms: 30000
+    backlog-list-name: Backlog          # Karten in dieser Liste werden analysiert (Story Points)
     base-url: https://api.trello.com/1
 
   claude:

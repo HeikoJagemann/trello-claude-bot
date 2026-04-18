@@ -2,9 +2,11 @@ package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.ClaudeClient;
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.internal.ApplyResult;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
+import com.example.trelloclaudebot.dto.trello.TrelloActionData;
 import com.example.trelloclaudebot.dto.trello.TrelloCardData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,25 +23,25 @@ public class TaskOrchestratorService {
     private final ClaudeClient  claudeClient;
     private final ApplyEngine   applyEngine;
     private final TrelloClient  trelloClient;
+    private final AppProperties props;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeClient claudeClient,
                                    ApplyEngine applyEngine,
-                                   TrelloClient trelloClient) {
+                                   TrelloClient trelloClient,
+                                   AppProperties props) {
         this.promptBuilder = promptBuilder;
         this.claudeClient  = claudeClient;
         this.applyEngine   = applyEngine;
         this.trelloClient  = trelloClient;
+        this.props         = props;
     }
 
     /**
-     * Vollständiger Verarbeitungsfluss für eine Trello-Action:
+     * Routing-Logik basierend auf der Trello-Liste:
      *
-     * 1. Kartendaten → InternalTask
-     * 2. Strukturierten Prompt bauen
-     * 3. Claude API aufrufen (erwartet FILE-Blöcke im Response)
-     * 4. ApplyEngine parst Response und schreibt Dateien
-     * 5. Summary als Kommentar auf die Karte schreiben
+     * Backlog  → Analyse + Story-Point-Schätzung als Kommentar
+     * Andere   → Code-Generierung via ApplyEngine + Summary-Kommentar
      */
     public void process(TrelloAction action) {
         if (action.getData() == null) {
@@ -53,30 +55,70 @@ public class TaskOrchestratorService {
             return;
         }
 
+        String listName = extractListName(action.getData());
         InternalTask task = new InternalTask(
                 card.getId(),
                 card.getName() != null ? card.getName() : "(kein Titel)",
                 card.getDesc() != null ? card.getDesc() : "",
-                action.getType()
+                action.getType(),
+                listName
         );
 
         log.info("Verarbeite Task: {}", task);
 
-        // Schritt 1: Prompt mit strukturiertem Ausgabeformat bauen
-        String prompt = promptBuilder.build(task);
+        if (isBacklog(listName)) {
+            processAnalysis(task);
+        } else {
+            processCodeGeneration(task);
+        }
+    }
 
-        // Schritt 2: Claude API aufrufen
+    // ── Analyse (Backlog) ─────────────────────────────────────────────────────
+
+    /**
+     * Backlog-Flow: Claude analysiert die Aufgabe und schätzt Story Points.
+     * Ergebnis wird direkt als Kommentar auf die Karte geschrieben.
+     */
+    private void processAnalysis(InternalTask task) {
+        log.info("Modus: Analyse + Story Points (Liste: '{}')", task.getListName());
+
+        String prompt   = promptBuilder.buildAnalysisPrompt(task);
+        String response = claudeClient.sendPrompt(prompt);
+
+        trelloClient.addComment(task.getCardId(), response);
+        log.info("Analyse für Karte {} abgeschlossen.", task.getCardId());
+    }
+
+    // ── Code-Generierung (alle anderen Listen) ────────────────────────────────
+
+    /**
+     * Code-Generierungs-Flow: Claude gibt FILE-Blöcke zurück,
+     * ApplyEngine schreibt sie auf Disk, Summary wird als Kommentar geschrieben.
+     */
+    private void processCodeGeneration(InternalTask task) {
+        log.info("Modus: Code-Generierung (Liste: '{}')", task.getListName());
+
+        String prompt         = promptBuilder.buildCodePrompt(task);
         String claudeResponse = claudeClient.sendPrompt(prompt);
-
-        // Schritt 3: FILE-Blöcke parsen und auf Disk schreiben
         List<ApplyResult> results = applyEngine.apply(claudeResponse);
+        String summary        = applyEngine.buildSummary(results);
 
-        // Schritt 4: Summary als Trello-Kommentar
-        String summary = applyEngine.buildSummary(results);
         trelloClient.addComment(task.getCardId(), summary);
-
-        log.info("Task {} abgeschlossen. {} Datei(en) geschrieben.",
+        log.info("Code-Generierung für Karte {} abgeschlossen. {} Datei(en) geschrieben.",
                 task.getCardId(),
                 results.stream().filter(r -> r.getStatus() == ApplyResult.Status.WRITTEN).count());
+    }
+
+    // ── Hilfsmethoden ─────────────────────────────────────────────────────────
+
+    private boolean isBacklog(String listName) {
+        return props.getTrello().getBacklogListName().equalsIgnoreCase(listName);
+    }
+
+    private String extractListName(TrelloActionData data) {
+        if (data.getList() != null && data.getList().getName() != null) {
+            return data.getList().getName();
+        }
+        return "";
     }
 }
