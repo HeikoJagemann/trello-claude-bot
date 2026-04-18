@@ -1,7 +1,9 @@
 package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.client.TrelloClient.TrelloCustomField;
 import com.example.trelloclaudebot.config.AppProperties;
+import com.example.trelloclaudebot.dto.internal.AnalysisResult;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
 import com.example.trelloclaudebot.dto.trello.TrelloActionData;
@@ -19,19 +21,22 @@ public class TaskOrchestratorService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskOrchestratorService.class);
 
-    private final PromptBuilder     promptBuilder;
-    private final ClaudeCodeRunner  claudeCodeRunner;
-    private final TrelloClient      trelloClient;
-    private final AppProperties     props;
+    private final PromptBuilder         promptBuilder;
+    private final ClaudeCodeRunner      claudeCodeRunner;
+    private final AnalysisResultParser  analysisResultParser;
+    private final TrelloClient          trelloClient;
+    private final AppProperties         props;
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeCodeRunner claudeCodeRunner,
+                                   AnalysisResultParser analysisResultParser,
                                    TrelloClient trelloClient,
                                    AppProperties props) {
-        this.promptBuilder    = promptBuilder;
-        this.claudeCodeRunner = claudeCodeRunner;
-        this.trelloClient     = trelloClient;
-        this.props            = props;
+        this.promptBuilder        = promptBuilder;
+        this.claudeCodeRunner     = claudeCodeRunner;
+        this.analysisResultParser = analysisResultParser;
+        this.trelloClient         = trelloClient;
+        this.props                = props;
     }
 
     /**
@@ -77,13 +82,14 @@ public class TaskOrchestratorService {
     /**
      * Backlog-Flow:
      * 1. Prüft, ob die Karte das "Refinement"-Label trägt. Falls nicht → überspringen.
-     * 2. Claude Code CLI analysiert die Aufgabe und schätzt Story Points.
-     * 3. Ergebnis als Kommentar auf die Karte.
+     * 2. Claude Code CLI analysiert die Aufgabe (JSON-Output).
+     * 3. Beschreibung, Story-Points-Custom-Field und Akzeptanzkriterien-Checkliste setzen.
      * 4. Label "Refinement" entfernen, Label "Ready" setzen.
      */
     private void processAnalysis(InternalTask task) {
-        String refinementName = props.getTrello().getRefinementLabelName();
-        String readyName      = props.getTrello().getReadyLabelName();
+        String refinementName      = props.getTrello().getRefinementLabelName();
+        String readyName           = props.getTrello().getReadyLabelName();
+        String storyPointsField    = props.getTrello().getStoryPointsFieldName();
 
         // Schritt 1 – Label-Prüfung
         List<TrelloLabel> cardLabels = trelloClient.fetchCardLabels(task.getCardId());
@@ -97,22 +103,85 @@ public class TaskOrchestratorService {
         log.info("Modus: Analyse + Story Points via Claude Code CLI (Liste: '{}', Label: '{}')",
                 task.getListName(), refinementName);
 
-        // Schritt 2 & 3 – Analyse + Kommentar
+        // Schritt 2 – Claude CLI aufrufen
         String prompt   = promptBuilder.buildAnalysisPrompt(task);
         String response = claudeCodeRunner.run(task, prompt);
-        trelloClient.addComment(task.getCardId(), response);
+
+        // Schritt 3 – JSON parsen und Karte befüllen
+        AnalysisResult result = analysisResultParser.parse(response);
+
+        if (result == null) {
+            log.warn("Analyse-Ergebnis konnte nicht geparst werden – schreibe Rohausgabe als Kommentar.");
+            trelloClient.addComment(task.getCardId(),
+                    "⚠️ Analyse konnte nicht strukturiert verarbeitet werden.\n\nRohausgabe:\n" + response);
+        } else {
+            applyAnalysisToCard(task, result, storyPointsField);
+        }
 
         // Schritt 4 – Labels tauschen
         swapLabels(task.getCardId(), refinementLabel.get(), readyName);
-
         log.info("Analyse für Karte {} abgeschlossen.", task.getCardId());
+    }
+
+    /**
+     * Schreibt das Analyse-Ergebnis in die Karte:
+     * - Beschreibung: Analyse + Begründung + Risiken als Markdown
+     * - Custom Field: Story Points (Zahl)
+     * - Checkliste: Akzeptanzkriterien
+     */
+    private void applyAnalysisToCard(InternalTask task, AnalysisResult result, String storyPointsFieldName) {
+        // Beschreibung zusammenbauen
+        String description = buildDescription(task, result);
+        trelloClient.updateCardDescription(task.getCardId(), description);
+
+        // Story Points als Custom Field
+        setStoryPointsField(task.getCardId(), result.getStoryPoints(), storyPointsFieldName);
+
+        // Akzeptanzkriterien als Checkliste
+        trelloClient.createChecklistWithItems(
+                task.getCardId(),
+                "Akzeptanzkriterien",
+                result.getAkzeptanzkriterien()
+        );
+    }
+
+    private String buildDescription(InternalTask task, AnalysisResult result) {
+        StringBuilder sb = new StringBuilder();
+
+        // Ursprüngliche Aufgabenbeschreibung erhalten
+        if (!task.getDescription().isBlank()) {
+            sb.append(task.getDescription()).append("\n\n---\n\n");
+        }
+
+        sb.append("## Analyse\n").append(result.getAnalyse()).append("\n\n");
+        sb.append("## Begründung (").append(result.getStoryPoints()).append(" Story Points)\n")
+          .append(result.getBegruendung()).append("\n\n");
+
+        if (!result.getRisiken().isEmpty()) {
+            sb.append("## Risiken & Annahmen\n");
+            result.getRisiken().forEach(r -> sb.append("- ").append(r).append("\n"));
+        }
+
+        return sb.toString().trim();
+    }
+
+    private void setStoryPointsField(String cardId, int storyPoints, String fieldName) {
+        List<TrelloCustomField> fields = trelloClient.fetchBoardCustomFields();
+        Optional<TrelloCustomField> field = fields.stream()
+                .filter(f -> fieldName.equalsIgnoreCase(f.getName()))
+                .findFirst();
+
+        if (field.isEmpty()) {
+            log.warn("Custom Field '{}' nicht auf dem Board gefunden – Story Points nicht gesetzt. " +
+                     "Bitte das Custom Field im Trello-Board anlegen.", fieldName);
+            return;
+        }
+
+        trelloClient.setCustomFieldNumber(cardId, field.get().getId(), storyPoints);
     }
 
     // ── Implementierung (alle anderen Listen) ─────────────────────────────────
 
-    /**
-     * Implementierungs-Flow: Claude Code CLI arbeitet direkt im Repo.
-     */
     private void processImplementation(InternalTask task) {
         log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
 
@@ -125,15 +194,9 @@ public class TaskOrchestratorService {
 
     // ── Label-Verwaltung ──────────────────────────────────────────────────────
 
-    /**
-     * Entfernt das "Refinement"-Label und setzt das "Ready"-Label.
-     * Wenn "Ready" auf dem Board nicht gefunden wird, wird nur entfernt.
-     */
     private void swapLabels(String cardId, TrelloLabel refinementLabel, String readyLabelName) {
-        // "Refinement" entfernen
         trelloClient.removeLabelFromCard(cardId, refinementLabel.getId());
 
-        // "Ready" auf dem Board nachschlagen
         List<TrelloLabel> boardLabels = trelloClient.fetchBoardLabels();
         Optional<TrelloLabel> readyLabel = findLabel(boardLabels, readyLabelName);
 
@@ -158,18 +221,10 @@ public class TaskOrchestratorService {
         return props.getTrello().getBacklogListName().equalsIgnoreCase(listName);
     }
 
-    /**
-     * Ermittelt den Listen-Namen aus der Action-Data.
-     *
-     * Trello befüllt {@code data.list} nur bei Karten-Bewegungen (createCard, moveCard).
-     * Bei updateCard-Actions (Label/Beschreibung ändern) fehlt das Feld – in diesem Fall
-     * wird die Liste über {@code data.card.idList} nachgeladen.
-     */
     private String extractListName(TrelloActionData data) {
         if (data.getList() != null && data.getList().getName() != null) {
             return data.getList().getName();
         }
-        // Fallback: idList aus der Karte → Listenname per API nachladen
         if (data.getCard() != null && data.getCard().getIdList() != null) {
             String listName = trelloClient.fetchListName(data.getCard().getIdList());
             log.debug("Listenname per API nachgeladen: '{}'", listName);

@@ -8,48 +8,40 @@ public class PromptBuilder {
 
     /**
      * Analyse-Prompt für Backlog-Karten.
-     * Claude gibt einen strukturierten Kommentar zurück – kein Code, kein FILE:-Format.
-     * Enthält Aufwandsschätzung in Story Points (Fibonacci) und eine kurze Analyse.
+     * Claude gibt ein JSON-Objekt zurück, das von {@code AnalysisResultParser} verarbeitet wird.
+     * Das Ergebnis wird als Kartenbeschreibung, Custom Field (Story Points)
+     * und Checkliste (Akzeptanzkriterien) in Trello eingetragen.
      */
     public String buildAnalysisPrompt(InternalTask task) {
         return """
                 Du bist ein erfahrener Agile Coach und Software-Architekt.
-
                 Analysiere die folgende Aufgabe aus dem Backlog und erstelle eine strukturierte \
                 Aufwandsschätzung. Antworte ausschließlich auf Deutsch.
 
-                WICHTIG: Gib NUR den Kommentar-Text zurück, keinen einleitenden Satz, keine \
-                Erklärung deiner Vorgehensweise.
+                WICHTIG: Deine Antwort besteht ausschließlich aus einem einzigen JSON-Objekt. \
+                Kein Text davor oder danach, keine Erklärung, kein Markdown außer dem JSON selbst.
 
-                ---
-
-                AUSGABEFORMAT (exakt so, ohne Abweichung):
-
-                📋 **Analyse**
-                <2–4 Sätze: Was ist die Aufgabe, was ist der Kontext?>
-
-                🎯 **Story Points: <Zahl>**
-                Skala: 1 · 2 · 3 · 5 · 8 · 13 · 21 (Fibonacci)
-
-                📊 **Begründung**
-                <Warum diese Punktzahl? Welche Faktoren bestimmen den Aufwand?>
-
-                ✅ **Akzeptanzkriterien (Vorschlag)**
-                - <Kriterium 1>
-                - <Kriterium 2>
-                - <Kriterium 3>
-
-                ⚠️ **Risiken & Annahmen**
-                - <Risiko oder Annahme 1>
-                - <Risiko oder Annahme 2>
-
-                ---
+                JSON-FORMAT (exakt, keine Abweichung):
+                {
+                  "storyPoints": <Ganzzahl aus der Fibonacci-Folge: 1, 2, 3, 5, 8, 13 oder 21>,
+                  "analyse": "<2–4 Sätze: Was ist die Aufgabe, was ist der Kontext?>",
+                  "begruendung": "<Warum diese Punktzahl? Welche Faktoren bestimmen den Aufwand?>",
+                  "akzeptanzkriterien": [
+                    "<Kriterium 1>",
+                    "<Kriterium 2>",
+                    "<Kriterium 3>"
+                  ],
+                  "risiken": [
+                    "<Risiko oder Annahme 1>",
+                    "<Risiko oder Annahme 2>"
+                  ]
+                }
 
                 AUFGABE:
 
-                **Titel:** %s
+                Titel: %s
 
-                **Beschreibung:**
+                Beschreibung:
                 %s
                 """.formatted(
                 task.getTitle(),

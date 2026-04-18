@@ -18,8 +18,9 @@ public class AppProperties {
         private String boardId;
         private long   pollIntervalMs  = 30_000;
         private String backlogListName      = "Backlog";
-        private String refinementLabelName = "Refinement";
-        private String readyLabelName      = "Ready";
+        private String refinementLabelName  = "Refinement";
+        private String readyLabelName       = "Ready";
+        private String storyPointsFieldName = "Story Points";
 
         public String getApiKey()              { return apiKey; }
         public String getApiToken()            { return apiToken; }
@@ -27,8 +28,9 @@ public class AppProperties {
         public String getBoardId()             { return boardId; }
         public long   getPollIntervalMs()      { return pollIntervalMs; }
         public String getBacklogListName()     { return backlogListName; }
-        public String getRefinementLabelName() { return refinementLabelName; }
-        public String getReadyLabelName()      { return readyLabelName; }
+        public String getRefinementLabelName()  { return refinementLabelName; }
+        public String getReadyLabelName()       { return readyLabelName; }
+        public String getStoryPointsFieldName() { return storyPointsFieldName; }
 
         public void setApiKey(String apiKey)                       { this.apiKey = apiKey; }
         public void setApiToken(String apiToken)                   { this.apiToken = apiToken; }
@@ -36,8 +38,9 @@ public class AppProperties {
         public void setBoardId(String boardId)                     { this.boardId = boardId; }
         public void setPollIntervalMs(long ms)                     { this.pollIntervalMs = ms; }
         public void setBacklogListName(String name)                { this.backlogListName = name; }
-        public void setRefinementLabelName(String name)            { this.refinementLabelName = name; }
-        public void setReadyLabelName(String name)                 { this.readyLabelName = name; }
+        public void setRefinementLabelName(String name)             { this.refinementLabelName = name; }
+        public void setReadyLabelName(String name)                  { this.readyLabelName = name; }
+        public void setStoryPointsFieldName(String name)            { this.storyPointsFieldName = name; }
     }
 
     public static class ClaudeCode {

@@ -236,6 +236,179 @@ public class TrelloClient {
         }
     }
 
+    // ── Karte aktualisieren ───────────────────────────────────────────────────
+
+    /**
+     * Setzt die Beschreibung einer Karte.
+     * Bestehender Inhalt wird überschrieben.
+     */
+    public void updateCardDescription(String cardId, String description) {
+        log.info("Aktualisiere Beschreibung von Karte {}", cardId);
+
+        try {
+            webClient.put()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(java.util.Map.of("desc", description))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+            log.info("Beschreibung von Karte {} aktualisiert.", cardId);
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Aktualisieren der Beschreibung {}: HTTP {} – {}",
+                    cardId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Aktualisieren der Beschreibung von Karte {}", cardId, e);
+        }
+    }
+
+    // ── Custom Fields ─────────────────────────────────────────────────────────
+
+    /**
+     * Gibt alle Custom Fields zurück, die auf dem konfigurierten Board definiert sind.
+     */
+    public List<TrelloCustomField> fetchBoardCustomFields() {
+        String boardId = props.getTrello().getBoardId();
+
+        try {
+            List<TrelloCustomField> fields = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/boards/{boardId}/customFields")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(boardId))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<List<TrelloCustomField>>() {})
+                    .block();
+
+            return fields != null ? fields : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Custom Fields: HTTP {} – {}",
+                    e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Custom Fields", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Setzt den Wert eines Custom Fields (Typ: number) auf einer Karte.
+     *
+     * @param cardId       ID der Karte
+     * @param customFieldId ID des Custom Fields
+     * @param value        Wert (z.B. Story Points als Zahl)
+     */
+    public void setCustomFieldNumber(String cardId, String customFieldId, int value) {
+        log.info("Setze Custom Field {} auf Karte {} = {}", customFieldId, cardId, value);
+
+        try {
+            webClient.put()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/cards/{cardId}/customField/{fieldId}/item")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(cardId, customFieldId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(java.util.Map.of("value", java.util.Map.of("number", String.valueOf(value))))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+            log.info("Custom Field {} auf Karte {} gesetzt.", customFieldId, cardId);
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Setzen des Custom Fields {}: HTTP {} – {}",
+                    customFieldId, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Setzen des Custom Fields {} auf Karte {}", customFieldId, cardId, e);
+        }
+    }
+
+    // ── Checklisten ───────────────────────────────────────────────────────────
+
+    /**
+     * Erstellt eine Checkliste auf einer Karte und befüllt sie mit den übergebenen Einträgen.
+     *
+     * @param cardId    ID der Karte
+     * @param name      Name der Checkliste
+     * @param items     Einträge (jeder wird als offenes Checklist-Item angelegt)
+     */
+    public void createChecklistWithItems(String cardId, String name, List<String> items) {
+        if (items == null || items.isEmpty()) {
+            log.info("Keine Checklisten-Einträge übergeben – Checkliste wird nicht erstellt.");
+            return;
+        }
+
+        log.info("Erstelle Checkliste '{}' mit {} Einträgen auf Karte {}", name, items.size(), cardId);
+
+        try {
+            // 1. Checkliste anlegen
+            ChecklistResponse checklist = webClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/checklists")
+                            .queryParam("key",    props.getTrello().getApiKey())
+                            .queryParam("token",  props.getTrello().getApiToken())
+                            .queryParam("idCard", cardId)
+                            .queryParam("name",   name)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(ChecklistResponse.class)
+                    .block();
+
+            if (checklist == null || checklist.id == null) {
+                log.error("Checkliste konnte nicht erstellt werden – leere Antwort.");
+                return;
+            }
+
+            String checklistId = checklist.id;
+            log.info("Checkliste {} erstellt, füge {} Items hinzu.", checklistId, items.size());
+
+            // 2. Items hinzufügen
+            for (String item : items) {
+                addCheckItem(checklistId, item);
+            }
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Erstellen der Checkliste: HTTP {} – {}",
+                    e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Erstellen der Checkliste auf Karte {}", cardId, e);
+        }
+    }
+
+    private void addCheckItem(String checklistId, String itemName) {
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("name", itemName);
+
+        try {
+            webClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/checklists/{checklistId}/checkItems")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(checklistId))
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .bodyValue(form)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Hinzufügen von CheckItem '{}': HTTP {} – {}",
+                    itemName, e.getStatusCode(), e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Hinzufügen von CheckItem '{}'", itemName, e);
+        }
+    }
+
     // ── Kommentar ─────────────────────────────────────────────────────────────
 
     /**
@@ -290,5 +463,30 @@ public class TrelloClient {
     private static class ListNameResponse {
         @JsonProperty("name")
         String name;
+    }
+
+    /** Wrapper für den POST /checklists Response. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class ChecklistResponse {
+        @JsonProperty("id")
+        String id;
+    }
+
+    // ── Öffentliches DTO für Custom Fields ───────────────────────────────────
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TrelloCustomField {
+        @JsonProperty("id")
+        private String id;
+
+        @JsonProperty("name")
+        private String name;
+
+        @JsonProperty("type")
+        private String type;
+
+        public String getId()   { return id; }
+        public String getName() { return name; }
+        public String getType() { return type; }
     }
 }
