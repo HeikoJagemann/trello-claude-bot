@@ -2,8 +2,8 @@
 
 Ein Spring Boot Backend, das Trello-Karten automatisch per KI verarbeitet.
 
-- **Backlog-Karten** → Claude API analysiert die Aufgabe und schätzt Story Points (Fibonacci)
-- **Sprint-Karten** → Claude Code CLI implementiert die Aufgabe direkt im lokalen Repo
+- **Backlog-Karten mit Label "Refinement"** → Claude API analysiert die Aufgabe und schätzt Story Points (Fibonacci). Danach wird das Label "Refinement" entfernt und "Ready" gesetzt.
+- **Sprint-Karten** → Claude Code CLI implementiert die Aufgabe direkt im lokalen Repo.
 
 ## Architektur
 
@@ -16,13 +16,19 @@ TrelloPollingService
         ▼
 TaskOrchestratorService
         │
-        ├─ Backlog ──► PromptBuilder ──► ClaudeClient (API)
-        │                                       │
-        │                               Analyse + Story Points
-        │                                       │
-        │                               TrelloClient → Kommentar
+        ├─ Backlog  ──► Hat Label "Refinement"?
+        │                    │ Nein → überspringen
+        │                    │ Ja
+        │                    ▼
+        │              PromptBuilder ──► ClaudeClient (API)
+        │                                      │
+        │                              Analyse + Story Points
+        │                                      │
+        │                              TrelloClient → Kommentar
+        │                              TrelloClient → Label "Refinement" entfernen
+        │                              TrelloClient → Label "Ready" setzen
         │
-        └─ Sprint  ──► PromptBuilder ──► ClaudeCodeRunner (CLI)
+        └─ Sprint   ──► PromptBuilder ──► ClaudeCodeRunner (CLI)
                                                 │
                                         claude -p "..." im Repo-Verzeichnis
                                         (liest/ändert Dateien direkt via Tools)
@@ -48,7 +54,8 @@ Kontext ermitteln, bevor es Änderungen vornimmt — genau wie ein Entwickler.
 - Maven 3.8+
 - [Claude Code CLI](https://claude.ai/code) installiert und im PATH (`claude --version`)
 - Trello API Key & Token ([hier holen](https://trello.com/power-ups/admin))
-- Anthropic API Key für Analyse-Funktion ([hier holen](https://console.anthropic.com))
+- Anthropic API Key für die Analyse-Funktion ([hier holen](https://console.anthropic.com))
+- Auf dem Trello-Board müssen die Labels **Refinement** und **Ready** angelegt sein
 
 ---
 
@@ -86,7 +93,9 @@ export CLAUDE_CODE_REPO_PATH=/pfad/zum/repo
 | Property | Standard | Beschreibung |
 |----------|----------|-------------|
 | `app.trello.poll-interval-ms` | `30000` | Polling-Intervall in ms |
-| `app.trello.backlog-list-name` | `Backlog` | Name der Analyse-Liste (Story Points) |
+| `app.trello.backlog-list-name` | `Backlog` | Name der Backlog-Liste |
+| `app.trello.refinement-label-name` | `Refinement` | Label, das die Analyse auslöst |
+| `app.trello.ready-label-name` | `Ready` | Label, das nach der Analyse gesetzt wird |
 | `app.claude.model` | `claude-sonnet-4-6` | Claude Modell (für Analyse) |
 | `app.claude.max-tokens` | `4096` | Max. Tokens pro Analyse-Antwort |
 | `app.claude-code.repo-path` | `.` | Repo-Verzeichnis für Claude Code CLI |
@@ -94,6 +103,14 @@ export CLAUDE_CODE_REPO_PATH=/pfad/zum/repo
 ---
 
 ## Starten
+
+### IntelliJ
+
+Die Run Configuration **TrelloClaudeBotApplication** ist im Repository eingecheckt
+(`.idea/runConfigurations/`) und startet die App automatisch mit dem Profil `local`.
+Einfach oben rechts auswählen und auf ▶ klicken.
+
+### Kommandozeile
 
 **Mit lokalem Profil** (empfohlen für Entwicklung):
 
@@ -116,7 +133,7 @@ mvn clean package -DskipTests
 java -jar target/trello-claude-bot-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-Der Server startet auf Port `8080` (kein öffentlicher Endpunkt erforderlich).
+Der Server startet auf Port **8085** (kein öffentlicher Endpunkt erforderlich).
 
 ---
 
@@ -132,15 +149,14 @@ src/main/java/com/example/trelloclaudebot/
 │   ├── TrelloPollingService.java     # @Scheduled Polling des Trello-Boards
 │   ├── TaskOrchestratorService.java  # Routing: Backlog → API, Sprint → CLI
 │   ├── PromptBuilder.java            # Prompts für Analyse und Implementierung
-│   ├── ClaudeCodeRunner.java         # ProcessBuilder → claude -p "..." im Repo
-│   └── (ClaudeClient über API nur für Backlog-Analyse)
+│   └── ClaudeCodeRunner.java         # ProcessBuilder → claude -p "..." im Repo
 ├── client/
 │   ├── ClaudeClient.java             # Anthropic Messages API (Analyse)
-│   └── TrelloClient.java             # Trello REST API (Polling + Kommentar)
+│   └── TrelloClient.java             # Trello REST API (Polling, Labels, Kommentar)
 └── dto/
     ├── internal/
     │   └── InternalTask.java         # Internes Task-Objekt
-    ├── trello/                       # Trello Action DTOs
+    ├── trello/                       # Trello Action/Label DTOs
     └── claude/                       # Claude Request/Response DTOs
 ```
 
