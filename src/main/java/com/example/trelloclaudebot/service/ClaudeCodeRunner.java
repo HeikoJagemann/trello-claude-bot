@@ -6,22 +6,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
  * Führt Claude Code CLI als Subprocess im konfigurierten Repo-Verzeichnis aus.
  *
- * Aufruf: {@code claude -p "<prompt>"}
+ * Der Prompt wird über stdin an den Prozess übergeben (nicht als Argument),
+ * um Probleme mit Sonderzeichen und Längenbeschränkungen auf Windows zu vermeiden.
  *
- * Claude Code hat direkten Zugriff auf alle Dateien im Repo und kann über seine
- * eigenen Tools (Read, Edit, Write, Bash, Grep usw.) den Code selbstständig
- * analysieren und anpassen. Kein manuelles Übergeben von Kontext nötig.
+ * Optionaler Kontext: Ist {@code app.claude-code.context-file} konfiguriert,
+ * wird der Inhalt dieser Datei jedem Prompt vorangestellt.
  */
 @Service
 public class ClaudeCodeRunner {
@@ -40,7 +39,7 @@ public class ClaudeCodeRunner {
     /**
      * Führt Claude Code mit dem übergebenen Prompt im konfigurierten Repo-Verzeichnis aus.
      *
-     * @param task Der zu verarbeitende Task (wird für Logging verwendet)
+     * @param task   Der zu verarbeitende Task (für Logging)
      * @param prompt Der vollständige Prompt für Claude Code
      * @return Ausgabe von Claude Code (stdout), oder eine Fehlermeldung
      */
@@ -54,20 +53,35 @@ public class ClaudeCodeRunner {
             return "❌ " + msg;
         }
 
+        String fullPrompt = buildFullPrompt(prompt);
         log.info("ClaudeCodeRunner: Starte Claude Code für Karte '{}' in '{}'",
                 task.getCardId(), repoPath);
+        log.debug("ClaudeCodeRunner: Prompt (ersten 200 Zeichen): {}",
+                fullPrompt.substring(0, Math.min(200, fullPrompt.length())));
 
-        ProcessBuilder pb = new ProcessBuilder("claude", "-p", prompt);
+        // Prompt über stdin übergeben, nicht als Argument –
+        // vermeidet Escaping-Probleme mit <, >, {, } auf Windows
+        ProcessBuilder pb = new ProcessBuilder("claude", "-p");
         pb.directory(repoDir);
-        pb.redirectErrorStream(false); // stderr separat lesen
+        pb.redirectErrorStream(false);
 
         try {
             Process process = pb.start();
 
-            // stdout und stderr parallel in eigenen Threads einlesen (verhindert Deadlock)
             StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
 
+            // stdin: Prompt schreiben und Stream schließen (EOF signalisiert Ende der Eingabe)
+            Thread stdinThread = new Thread(() -> {
+                try (OutputStream os = process.getOutputStream();
+                     OutputStreamWriter writer = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
+                    writer.write(fullPrompt);
+                } catch (IOException e) {
+                    log.warn("ClaudeCodeRunner: Fehler beim Schreiben in stdin", e);
+                }
+            });
+
+            // stdout und stderr parallel lesen (verhindert Deadlock)
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
@@ -86,11 +100,13 @@ public class ClaudeCodeRunner {
                 }
             });
 
+            stdinThread.start();
             stdoutThread.start();
             stderrThread.start();
 
             boolean finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES);
 
+            stdinThread.join();
             stdoutThread.join();
             stderrThread.join();
 
@@ -102,7 +118,7 @@ public class ClaudeCodeRunner {
             }
 
             int exitCode = process.exitValue();
-            String output = stdout.toString().trim();
+            String output   = stdout.toString().trim();
             String errOutput = stderr.toString().trim();
 
             if (!errOutput.isBlank()) {
@@ -126,6 +142,32 @@ public class ClaudeCodeRunner {
             Thread.currentThread().interrupt();
             log.error("ClaudeCodeRunner: Unterbrochen", e);
             return "❌ Claude Code wurde unterbrochen.";
+        }
+    }
+
+    /**
+     * Stellt den optionalen Kontext-Text aus der konfigurierten Datei
+     * dem eigentlichen Prompt voran.
+     */
+    private String buildFullPrompt(String prompt) {
+        String contextFile = props.getClaudeCode().getContextFile();
+        if (contextFile == null || contextFile.isBlank()) {
+            return prompt;
+        }
+
+        Path path = Paths.get(contextFile);
+        if (!Files.exists(path)) {
+            log.warn("ClaudeCodeRunner: Kontext-Datei '{}' nicht gefunden – wird ignoriert.", contextFile);
+            return prompt;
+        }
+
+        try {
+            String context = Files.readString(path, StandardCharsets.UTF_8).strip();
+            log.debug("ClaudeCodeRunner: Kontext-Datei '{}' geladen ({} Zeichen).", contextFile, context.length());
+            return context + "\n\n---\n\n" + prompt;
+        } catch (IOException e) {
+            log.warn("ClaudeCodeRunner: Kontext-Datei '{}' konnte nicht gelesen werden.", contextFile, e);
+            return prompt;
         }
     }
 }

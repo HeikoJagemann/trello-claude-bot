@@ -47,8 +47,17 @@ public class AppProperties {
         /** Pfad zum lokalen Repo-Verzeichnis, in dem Claude Code CLI ausgeführt wird. */
         private String repoPath = ".";
 
-        public String getRepoPath()           { return repoPath; }
-        public void   setRepoPath(String p)   { this.repoPath = p; }
+        /**
+         * Optionaler Pfad zu einer Kontext-Datei (z.B. CLAUDE.md oder Projektbeschreibung).
+         * Ihr Inhalt wird jedem Prompt vorangestellt, damit Claude den Projektrahmen kennt.
+         */
+        private String contextFile = "";
+
+        public String getRepoPath()             { return repoPath; }
+        public String getContextFile()          { return contextFile; }
+
+        public void setRepoPath(String p)       { this.repoPath = p; }
+        public void setContextFile(String f)    { this.contextFile = f; }
     }
 
 }

@@ -15,6 +15,7 @@ app:
 
   claude-code:
     repo-path: ${CLAUDE_CODE_REPO_PATH:.}
+    context-file: ${CLAUDE_CODE_CONTEXT_FILE:}   # optional: Pfad zu Kontext-/CLAUDE.md-Datei
 
 logging:
   level:
