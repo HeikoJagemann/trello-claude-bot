@@ -15,6 +15,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 
@@ -44,7 +45,8 @@ public class TrelloClient {
      */
     public List<TrelloAction> fetchRecentActions(Instant since) {
         String boardId  = props.getTrello().getBoardId();
-        String sinceStr = DateTimeFormatter.ISO_INSTANT.format(since);
+        // Trello API versteht nur Millisekunden-Präzision – Nanosekunden abschneiden
+        String sinceStr = DateTimeFormatter.ISO_INSTANT.format(since.truncatedTo(ChronoUnit.MILLIS));
 
         log.debug("Polling Trello Board {} seit {}", boardId, sinceStr);
 
