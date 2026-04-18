@@ -61,7 +61,7 @@ public class ClaudeCodeRunner {
 
         // Prompt über stdin übergeben, nicht als Argument –
         // vermeidet Escaping-Probleme mit <, >, {, } auf Windows
-        ProcessBuilder pb = new ProcessBuilder("claude", "-p");
+        ProcessBuilder pb = new ProcessBuilder("claude", "-p", "--dangerously-skip-permissions");
         pb.directory(repoDir);
         pb.redirectErrorStream(false);
 
