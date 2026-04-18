@@ -60,11 +60,15 @@ public class ClaudeClient {
             return text;
 
         } catch (WebClientResponseException e) {
-            log.error("Claude API Fehler: HTTP {} – {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return "Fehler bei der KI-Verarbeitung: " + e.getStatusCode();
+            String body = e.getResponseBodyAsString();
+            log.error("Claude API Fehler: HTTP {} – {}", e.getStatusCode(), body);
+            // Fehlermeldung inkl. API-Body in den Trello-Kommentar schreiben (max. 500 Zeichen),
+            // damit die Ursache direkt an der Karte sichtbar ist.
+            String snippet = body.length() > 500 ? body.substring(0, 500) + "…" : body;
+            return "❌ Claude API Fehler (" + e.getStatusCode() + "):\n```\n" + snippet + "\n```";
         } catch (Exception e) {
             log.error("Unerwarteter Fehler beim Claude API Aufruf", e);
-            return "Interner Fehler bei der KI-Verarbeitung.";
+            return "❌ Interner Fehler bei der KI-Verarbeitung: " + e.getMessage();
         }
     }
 }
