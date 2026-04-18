@@ -65,11 +65,22 @@ public class TaskOrchestratorService {
         }
 
         String listName = extractListName(action.getData());
+        processCard(card, listName, action.getType());
+    }
+
+    /**
+     * Verarbeitet eine Karte direkt (ohne TrelloAction) – wird beim Startup-Scan genutzt.
+     */
+    public void processCard(TrelloCardData card, String listName) {
+        processCard(card, listName, "startupScan");
+    }
+
+    private void processCard(TrelloCardData card, String listName, String actionType) {
         InternalTask task = new InternalTask(
                 card.getId(),
                 card.getName() != null ? card.getName() : "(kein Titel)",
                 card.getDesc() != null ? card.getDesc() : "",
-                action.getType(),
+                actionType,
                 listName
         );
 

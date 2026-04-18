@@ -1,8 +1,11 @@
 package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.TrelloClient;
+import com.example.trelloclaudebot.client.TrelloClient.BoardList;
 import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.trello.TrelloAction;
+import com.example.trelloclaudebot.dto.trello.TrelloCardData;
+import com.example.trelloclaudebot.dto.trello.TrelloLabel;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -58,6 +62,67 @@ public class TrelloPollingService {
         log.info("Trello Polling gestartet für Board '{}'. Polling-Intervall: {} ms",
                 props.getTrello().getBoardId(),
                 props.getTrello().getPollIntervalMs());
+        scanExistingCards();
+    }
+
+    /**
+     * Scannt beim Start alle relevanten Listen und verarbeitet vorhandene Karten sofort,
+     * ohne dass eine Änderung an der Karte nötig ist.
+     *
+     * Sprint-Liste: alle Karten werden implementiert.
+     * Backlog-Liste: nur Karten mit "Refinement"-Label werden analysiert.
+     */
+    private void scanExistingCards() {
+        log.info("Startup-Scan: Suche vorhandene Karten in Sprint- und Backlog-Liste...");
+
+        List<BoardList> lists = trelloClient.fetchBoardLists();
+        if (lists.isEmpty()) {
+            log.warn("Startup-Scan: Keine Listen gefunden – Scan übersprungen.");
+            return;
+        }
+
+        String sprintName    = props.getTrello().getSprintListName();
+        String backlogName   = props.getTrello().getBacklogListName();
+        String refinementName = props.getTrello().getRefinementLabelName();
+
+        for (BoardList list : lists) {
+            if (sprintName.equalsIgnoreCase(list.getName())) {
+                List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
+                log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), sprintName);
+                for (TrelloCardData card : cards) {
+                    log.info("Startup-Scan: Verarbeite Sprint-Karte '{}'", card.getName());
+                    try {
+                        orchestratorService.processCard(card, sprintName);
+                        markProcessed(card.getId());
+                    } catch (Exception e) {
+                        log.error("Startup-Scan: Fehler bei Karte '{}'", card.getName(), e);
+                    }
+                }
+
+            } else if (backlogName.equalsIgnoreCase(list.getName())) {
+                List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
+                log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), backlogName);
+                for (TrelloCardData card : cards) {
+                    List<TrelloLabel> labels = trelloClient.fetchCardLabels(card.getId());
+                    boolean hasRefinement = labels.stream()
+                            .anyMatch(l -> refinementName.equalsIgnoreCase(l.getName()));
+                    if (!hasRefinement) {
+                        log.debug("Startup-Scan: Karte '{}' hat kein '{}'-Label – übersprungen.",
+                                card.getName(), refinementName);
+                        continue;
+                    }
+                    log.info("Startup-Scan: Verarbeite Backlog-Karte '{}'", card.getName());
+                    try {
+                        orchestratorService.processCard(card, backlogName);
+                        markProcessed(card.getId());
+                    } catch (Exception e) {
+                        log.error("Startup-Scan: Fehler bei Karte '{}'", card.getName(), e);
+                    }
+                }
+            }
+        }
+
+        log.info("Startup-Scan abgeschlossen.");
     }
 
     @Scheduled(fixedDelayString = "${app.trello.poll-interval-ms:30000}")

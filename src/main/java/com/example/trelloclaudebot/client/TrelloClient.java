@@ -479,6 +479,40 @@ public class TrelloClient {
         }
     }
 
+    // ── Karten einer Liste ────────────────────────────────────────────────────
+
+    /**
+     * Gibt alle Karten einer Liste zurück.
+     *
+     * @param listId ID der Trello-Liste
+     * @return Kartenliste oder leer bei Fehler
+     */
+    public List<com.example.trelloclaudebot.dto.trello.TrelloCardData> fetchCardsInList(String listId) {
+        try {
+            List<com.example.trelloclaudebot.dto.trello.TrelloCardData> cards = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/lists/{listId}/cards")
+                            .queryParam("fields", "id,name,desc")
+                            .queryParam("key",   props.getTrello().getApiKey())
+                            .queryParam("token", props.getTrello().getApiToken())
+                            .build(listId))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<
+                            List<com.example.trelloclaudebot.dto.trello.TrelloCardData>>() {})
+                    .block();
+
+            return cards != null ? cards : Collections.emptyList();
+
+        } catch (WebClientResponseException e) {
+            log.error("Trello API Fehler beim Laden der Karten aus Liste {}: HTTP {} – {}",
+                    listId, e.getStatusCode(), e.getResponseBodyAsString());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Unerwarteter Fehler beim Laden der Karten aus Liste {}", listId, e);
+            return Collections.emptyList();
+        }
+    }
+
     // ── Listen-Verwaltung ─────────────────────────────────────────────────────
 
     /**
