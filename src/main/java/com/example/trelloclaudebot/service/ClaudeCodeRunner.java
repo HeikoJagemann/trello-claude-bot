@@ -71,6 +71,8 @@ public class ClaudeCodeRunner {
             StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
 
+            String cardLabel = "[Karte " + task.getCardId() + "] ";
+
             // stdin: Prompt schreiben und Stream schließen (EOF signalisiert Ende der Eingabe)
             Thread stdinThread = new Thread(() -> {
                 try (OutputStream os = process.getOutputStream();
@@ -81,20 +83,29 @@ public class ClaudeCodeRunner {
                 }
             });
 
-            // stdout und stderr parallel lesen (verhindert Deadlock)
+            // stdout: jede Zeile sofort loggen + für Rückgabe sammeln
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                    reader.lines().forEach(line -> stdout.append(line).append("\n"));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        log.info("{}  {}", cardLabel, line);
+                        stdout.append(line).append("\n");
+                    }
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Lesen von stdout", e);
                 }
             });
 
+            // stderr: jede Zeile sofort als WARN loggen
             Thread stderrThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
-                    reader.lines().forEach(line -> stderr.append(line).append("\n"));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        log.warn("{} ⚠ {}", cardLabel, line);
+                        stderr.append(line).append("\n");
+                    }
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Lesen von stderr", e);
                 }
@@ -118,16 +129,11 @@ public class ClaudeCodeRunner {
             }
 
             int exitCode = process.exitValue();
-            String output   = stdout.toString().trim();
+            String output    = stdout.toString().trim();
             String errOutput = stderr.toString().trim();
 
-            if (!errOutput.isBlank()) {
-                log.warn("ClaudeCodeRunner stderr: {}", errOutput);
-            }
-
             if (exitCode != 0) {
-                log.error("ClaudeCodeRunner: Exitcode {} für Karte '{}'. Stderr: {}",
-                        exitCode, task.getCardId(), errOutput);
+                log.error("ClaudeCodeRunner: Exitcode {} für Karte '{}'.", exitCode, task.getCardId());
                 return "❌ Claude Code fehlgeschlagen (Exit " + exitCode + "):\n" + errOutput;
             }
 
