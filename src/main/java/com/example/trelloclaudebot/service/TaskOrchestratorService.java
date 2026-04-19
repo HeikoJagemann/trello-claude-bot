@@ -20,18 +20,27 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class TaskOrchestratorService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskOrchestratorService.class);
 
-    private final PromptBuilder         promptBuilder;
-    private final ClaudeCodeRunner      claudeCodeRunner;
-    private final AnalysisResultParser  analysisResultParser;
-    private final TrelloClient          trelloClient;
-    private final GitService            gitService;
-    private final AppProperties         props;
+    private final PromptBuilder              promptBuilder;
+    private final ClaudeCodeRunner           claudeCodeRunner;
+    private final AnalysisResultParser       analysisResultParser;
+    private final TrelloClient               trelloClient;
+    private final GitService                 gitService;
+    private final AppProperties              props;
+    private final ScheduledExecutorService   scheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "claude-retry-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
 
     public TaskOrchestratorService(PromptBuilder promptBuilder,
                                    ClaudeCodeRunner claudeCodeRunner,
@@ -213,43 +222,71 @@ public class TaskOrchestratorService {
 
     private void processImplementation(InternalTask task) {
         log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
+        processImplementationWithRetry(task, null, 0);
+    }
+
+    private void processImplementationWithRetry(InternalTask task, String sessionId, int attempt) {
+        int maxRetries = props.getClaudeCode().getMaxRetries();
+
+        if (attempt > maxRetries) {
+            log.error("Maximale Wiederholungsanzahl ({}) erreicht für Karte {} – abgebrochen.", maxRetries, task.getCardId());
+            trelloClient.addComment(task.getCardId(),
+                    "❌ Maximale Anzahl Versuche (" + maxRetries + ") erreicht – manuelle Bearbeitung nötig.");
+            return;
+        }
 
         // Offene Akzeptanzkriterien mit IDs laden
         List<CheckItemRef> checkItems = fetchIncompleteCheckItems(task.getCardId());
         List<String> kriterienNamen = checkItems.stream().map(CheckItemRef::displayName).toList();
 
         InternalTask enrichedTask = new InternalTask(
-                task.getCardId(),
-                task.getTitle(),
-                task.getDescription(),
-                task.getActionType(),
-                task.getListName(),
-                kriterienNamen
-        );
+                task.getCardId(), task.getTitle(), task.getDescription(),
+                task.getActionType(), task.getListName(), kriterienNamen);
 
         String headBefore = gitService.getCurrentHead();
-        log.debug("HEAD vor Implementierung: {}", headBefore);
 
-        String prompt       = promptBuilder.buildCodePrompt(enrichedTask);
-        RunResult runResult = claudeCodeRunner.run(enrichedTask, prompt);
+        RunResult runResult;
+        if (sessionId != null && !sessionId.isBlank()) {
+            log.info("Resume Versuch {} von {} für Karte '{}'", attempt, maxRetries, task.getCardId());
+            String continuationPrompt = """
+                    Bitte mache weiter wo du aufgehört hast.
+                    Vergiss nicht, am Ende die ERLEDIGT-Zeile zu schreiben (z.B. ERLEDIGT: 1, 2).
+                    """;
+            runResult = claudeCodeRunner.resume(enrichedTask, sessionId, continuationPrompt);
+        } else {
+            String prompt = promptBuilder.buildCodePrompt(enrichedTask);
+            runResult = claudeCodeRunner.run(enrichedTask, prompt);
+        }
 
-        // Fallback: falls Claude Code nicht selbst commitet, Auto-Commit erstellen
+        // Rate-Limit → warten und neu versuchen
+        if (runResult.isRateLimit()) {
+            long waitMinutes = props.getClaudeCode().getRateLimitWaitMinutes();
+            log.warn("Rate-Limit für Karte {} – warte {} Minuten (Versuch {}/{}).",
+                    task.getCardId(), waitMinutes, attempt + 1, maxRetries);
+            trelloClient.addComment(task.getCardId(),
+                    "⏳ Token-Limit erreicht – warte " + waitMinutes + " Minuten, dann Versuch "
+                            + (attempt + 1) + "/" + maxRetries + ".");
+            String nextSessionId = runResult.sessionId().isBlank() ? sessionId : runResult.sessionId();
+            scheduler.schedule(
+                    () -> processImplementationWithRetry(task, nextSessionId, attempt + 1),
+                    waitMinutes, TimeUnit.MINUTES);
+            return;
+        }
+
+        // Commit + Push
         gitService.commitIfNeeded("Implementierung: " + task.getTitle());
-
-        // Git push + neue Commits ermitteln
-        boolean pushed = gitService.push();
+        boolean pushed    = gitService.push();
         List<String> newCommits = gitService.getCommitsSince(headBefore);
 
-        // Kommentar zusammenbauen: Summary + Commits + Token-Verbrauch
+        // Kommentar
         String comment = buildImplementationComment(runResult.text(), pushed, newCommits, runResult);
         trelloClient.addComment(task.getCardId(), comment);
-        log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
 
-        // Nur erledigte Akzeptanzkriterien abhaken
+        // Erledigte Kriterien abhaken
         if (!checkItems.isEmpty()) {
             Set<Integer> erledigtIndices = parseErledigtIndices(runResult.text(), checkItems.size());
             if (erledigtIndices.isEmpty()) {
-                log.info("Keine ERLEDIGT-Zeile in der Ausgabe – keine Kriterien werden abgehakt.");
+                log.info("Keine ERLEDIGT-Zeile – keine Kriterien abgehakt.");
             } else {
                 log.info("Hake {} von {} Kriterien auf Karte {} ab: {}",
                         erledigtIndices.size(), checkItems.size(), task.getCardId(), erledigtIndices);
@@ -262,15 +299,37 @@ public class TaskOrchestratorService {
             }
         }
 
-        // Karte in QA-Liste verschieben – nur wenn alle Kriterien erledigt
+        // Noch offene Kriterien → Resume planen
         List<CheckItemRef> nochOffen = fetchIncompleteCheckItems(task.getCardId());
+        if (!nochOffen.isEmpty() && attempt < maxRetries) {
+            String nextSessionId = runResult.sessionId().isBlank() ? sessionId : runResult.sessionId();
+            if (nextSessionId != null && !nextSessionId.isBlank()) {
+                log.info("{} Kriterien noch offen – plane Resume für Karte {} (Versuch {}/{}).",
+                        nochOffen.size(), task.getCardId(), attempt + 1, maxRetries);
+                trelloClient.addComment(task.getCardId(),
+                        "🔄 Noch " + nochOffen.size() + " offene Kriterien – starte Resume (Versuch "
+                                + (attempt + 1) + "/" + maxRetries + ").");
+                scheduler.schedule(
+                        () -> processImplementationWithRetry(task, nextSessionId, attempt + 1),
+                        1, TimeUnit.SECONDS);
+            } else {
+                log.warn("Keine Session-ID verfügbar – Resume nicht möglich. Karte {} bleibt in Sprint.", task.getCardId());
+            }
+            return;
+        }
+
+        // Alle erledigt → nach QA
         if (nochOffen.isEmpty()) {
             log.info("Alle Kriterien erledigt – verschiebe Karte {} in QA.", task.getCardId());
             moveCardToQa(task.getCardId());
         } else {
-            log.info("{} Kriterien noch offen – Karte {} bleibt in Sprint.",
+            log.warn("Max. Versuche erreicht, {} Kriterien noch offen – Karte {} bleibt in Sprint.",
                     nochOffen.size(), task.getCardId());
+            trelloClient.addComment(task.getCardId(),
+                    "⚠️ Nach " + maxRetries + " Versuchen noch " + nochOffen.size()
+                            + " offene Kriterien – bitte manuell prüfen.");
         }
+        log.info("Implementierung für Karte {} abgeschlossen (Versuch {}).", task.getCardId(), attempt + 1);
     }
 
     /** Referenz auf ein einzelnes Checklist-Item inkl. IDs für die Trello API. */

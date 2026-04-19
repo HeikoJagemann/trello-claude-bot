@@ -35,14 +35,17 @@ public class ClaudeCodeRunner {
     }
 
     /**
-     * Ergebnis eines Claude-Code-Laufs: Antworttext + Token-Verbrauch.
+     * Ergebnis eines Claude-Code-Laufs: Antworttext + Token-Verbrauch + Session-ID.
      */
     public record RunResult(
-            String text,
-            int    inputTokens,
-            int    outputTokens,
-            int    cacheReadTokens,
-            double costUsd
+            String  text,
+            String  sessionId,
+            int     inputTokens,
+            int     outputTokens,
+            int     cacheReadTokens,
+            double  costUsd,
+            boolean isError,
+            boolean isRateLimit
     ) {
         /** Liefert true wenn Token-Daten vorhanden sind. */
         public boolean hasTokenInfo() {
@@ -66,9 +69,29 @@ public class ClaudeCodeRunner {
     }
 
     /**
+     * Setzt einen unterbrochenen Lauf mit der gespeicherten Session-ID fort.
+     *
+     * @param task              Task (für Logging)
+     * @param sessionId         Session-ID aus dem vorherigen RunResult
+     * @param continuationPrompt Prompt der an Claude geschickt wird (z.B. "Mache weiter...")
+     */
+    public RunResult resume(InternalTask task, String sessionId, String continuationPrompt) {
+        log.info("ClaudeCodeRunner: Resume Session '{}' für Karte '{}'", sessionId, task.getCardId());
+        return execute(task, continuationPrompt,
+                new ProcessBuilder("claude", "--resume", sessionId,
+                        "-p", "--dangerously-skip-permissions", "--output-format", "json"));
+    }
+
+    /**
      * Führt Claude Code aus und gibt Text + Token-Verbrauch zurück.
      */
     public RunResult run(InternalTask task, String prompt) {
+        ProcessBuilder pb = new ProcessBuilder(
+                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "json");
+        return execute(task, buildFullPrompt(prompt), pb);
+    }
+
+    private RunResult execute(InternalTask task, String prompt, ProcessBuilder pb) {
         String repoPath = props.getClaudeCode().getRepoPath();
         File repoDir = new File(repoPath);
 
@@ -78,14 +101,11 @@ public class ClaudeCodeRunner {
             return errorResult("❌ " + msg);
         }
 
-        String fullPrompt = buildFullPrompt(prompt);
         log.info("ClaudeCodeRunner: Starte Claude Code für Karte '{}' in '{}'",
                 task.getCardId(), repoPath);
         log.debug("ClaudeCodeRunner: Prompt (ersten 200 Zeichen): {}",
-                fullPrompt.substring(0, Math.min(200, fullPrompt.length())));
+                prompt.substring(0, Math.min(200, prompt.length())));
 
-        ProcessBuilder pb = new ProcessBuilder(
-                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "json");
         pb.directory(repoDir);
         pb.redirectErrorStream(false);
 
@@ -182,27 +202,42 @@ public class ClaudeCodeRunner {
         try {
             JsonNode root = objectMapper.readTree(raw);
 
+            String  sessionId   = root.path("session_id").asText("");
+            boolean isError     = root.path("is_error").asBoolean(false);
+            String  subtype     = root.path("subtype").asText("");
+
             String text = root.path("result").asText("").trim();
             if (text.isBlank()) {
-                text = "✅ Claude Code abgeschlossen (keine Textausgabe).";
+                text = isError ? "❌ Claude Code meldete einen Fehler." : "✅ Claude Code abgeschlossen (keine Textausgabe).";
             }
 
-            JsonNode usage = root.path("usage");
-            int inputTokens     = usage.path("input_tokens").asInt(0);
-            int outputTokens    = usage.path("output_tokens").asInt(0);
-            int cacheRead       = usage.path("cache_read_input_tokens").asInt(0);
-            double cost         = root.path("total_cost_usd").asDouble(0.0);
+            JsonNode usage  = root.path("usage");
+            int inputTokens  = usage.path("input_tokens").asInt(0);
+            int outputTokens = usage.path("output_tokens").asInt(0);
+            int cacheRead    = usage.path("cache_read_input_tokens").asInt(0);
+            double cost      = root.path("total_cost_usd").asDouble(0.0);
 
-            return new RunResult(text, inputTokens, outputTokens, cacheRead, cost);
+            boolean isRateLimit = isError && isRateLimitError(text + " " + subtype);
+
+            return new RunResult(text, sessionId, inputTokens, outputTokens, cacheRead, cost, isError, isRateLimit);
 
         } catch (Exception e) {
             log.warn("ClaudeCodeRunner: JSON-Parsing fehlgeschlagen für Karte '{}' – Rohausgabe wird verwendet.", cardId);
-            return errorResult(raw);
+            return new RunResult(raw, "", 0, 0, 0, 0.0, true, isRateLimitError(raw));
         }
     }
 
+    private static boolean isRateLimitError(String text) {
+        if (text == null) return false;
+        String lower = text.toLowerCase();
+        return lower.contains("rate limit") || lower.contains("rate_limit")
+                || lower.contains("quota")  || lower.contains("429")
+                || lower.contains("too many requests") || lower.contains("overloaded")
+                || lower.contains("token limit") || lower.contains("context length");
+    }
+
     private static RunResult errorResult(String message) {
-        return new RunResult(message, 0, 0, 0, 0.0);
+        return new RunResult(message, "", 0, 0, 0, 0.0, true, false);
     }
 
     // ── Kontext-Datei ─────────────────────────────────────────────────────────

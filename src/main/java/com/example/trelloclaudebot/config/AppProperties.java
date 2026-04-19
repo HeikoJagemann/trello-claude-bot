@@ -62,13 +62,23 @@ public class AppProperties {
         /** Maximale Laufzeit eines Claude-Code-Prozesses in Minuten. Standard: 30. */
         private long timeoutMinutes = 30;
 
-        public String getRepoPath()             { return repoPath; }
-        public String getContextFile()          { return contextFile; }
-        public long   getTimeoutMinutes()       { return timeoutMinutes; }
+        /** Maximale Anzahl Wiederholungsversuche bei unvollständigem Ergebnis. Standard: 5. */
+        private int maxRetries = 5;
 
-        public void setRepoPath(String p)       { this.repoPath = p; }
-        public void setContextFile(String f)    { this.contextFile = f; }
-        public void setTimeoutMinutes(long t)   { this.timeoutMinutes = t; }
+        /** Wartezeit in Minuten nach Token-Erschöpfung vor dem nächsten Versuch. Standard: 240 (4h). */
+        private long rateLimitWaitMinutes = 240;
+
+        public String getRepoPath()                  { return repoPath; }
+        public String getContextFile()               { return contextFile; }
+        public long   getTimeoutMinutes()            { return timeoutMinutes; }
+        public int    getMaxRetries()                { return maxRetries; }
+        public long   getRateLimitWaitMinutes()      { return rateLimitWaitMinutes; }
+
+        public void setRepoPath(String p)            { this.repoPath = p; }
+        public void setContextFile(String f)         { this.contextFile = f; }
+        public void setTimeoutMinutes(long t)        { this.timeoutMinutes = t; }
+        public void setMaxRetries(int r)             { this.maxRetries = r; }
+        public void setRateLimitWaitMinutes(long m)  { this.rateLimitWaitMinutes = m; }
     }
 
 }

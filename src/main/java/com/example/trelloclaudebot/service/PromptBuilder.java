@@ -3,6 +3,8 @@ package com.example.trelloclaudebot.service;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class PromptBuilder {
 
