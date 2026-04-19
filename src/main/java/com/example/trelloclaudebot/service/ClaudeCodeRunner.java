@@ -18,10 +18,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Führt Claude Code CLI als Subprocess im konfigurierten Repo-Verzeichnis aus.
  *
- * Verwendet {@code --output-format json}, damit Token-Usage und Kosten aus dem
- * JSON-Result ausgelesen werden können.
- * stderr wird live geloggt (Claude Code schreibt dort Fortschritt/Tool-Calls).
- * stdout (JSON) wird nach Abschluss geparst.
+ * Verwendet {@code --output-format stream-json}, damit jedes Event sofort auf stdout
+ * geloggt wird (Tool-Calls, Assistant-Text, Fortschritt).
+ * Die letzte Zeile (type=result) enthält Token-Usage und Kosten.
  */
 @Service
 public class ClaudeCodeRunner {
@@ -71,15 +70,15 @@ public class ClaudeCodeRunner {
     /**
      * Setzt einen unterbrochenen Lauf mit der gespeicherten Session-ID fort.
      *
-     * @param task              Task (für Logging)
-     * @param sessionId         Session-ID aus dem vorherigen RunResult
+     * @param task               Task (für Logging)
+     * @param sessionId          Session-ID aus dem vorherigen RunResult
      * @param continuationPrompt Prompt der an Claude geschickt wird (z.B. "Mache weiter...")
      */
     public RunResult resume(InternalTask task, String sessionId, String continuationPrompt) {
         log.info("ClaudeCodeRunner: Resume Session '{}' für Karte '{}'", sessionId, task.getCardId());
         return execute(task, continuationPrompt,
                 new ProcessBuilder("claude", "--resume", sessionId,
-                        "-p", "--dangerously-skip-permissions", "--output-format", "json"));
+                        "-p", "--dangerously-skip-permissions", "--output-format", "stream-json"));
     }
 
     /**
@@ -87,7 +86,7 @@ public class ClaudeCodeRunner {
      */
     public RunResult run(InternalTask task, String prompt) {
         ProcessBuilder pb = new ProcessBuilder(
-                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "json");
+                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "stream-json");
         return execute(task, buildFullPrompt(prompt), pb);
     }
 
@@ -112,39 +111,43 @@ public class ClaudeCodeRunner {
         try {
             Process process = pb.start();
 
-            StringBuilder stdout = new StringBuilder();
             String cardLabel = "[Karte " + task.getCardId() + "] ";
+            // Holds the last "type=result" line for token extraction
+            StringBuilder resultLine  = new StringBuilder();
+            // Holds the full assistant text (accumulated from type=assistant events)
+            StringBuilder resultText  = new StringBuilder();
 
             // stdin: Prompt schreiben und Stream schließen
             Thread stdinThread = new Thread(() -> {
                 try (OutputStream os = process.getOutputStream();
                      OutputStreamWriter writer = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
-                    writer.write(fullPrompt);
+                    writer.write(prompt);
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Schreiben in stdin", e);
                 }
             });
 
-            // stdout: JSON-Result sammeln (kein Live-Log, da ein einzelnes JSON-Objekt)
+            // stdout: JSONL-Events live loggen (stream-json liefert eine Zeile pro Event)
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        stdout.append(line).append("\n");
+                        if (line.isBlank()) continue;
+                        logStreamEvent(cardLabel, line, resultLine, resultText);
                     }
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Lesen von stdout", e);
                 }
             });
 
-            // stderr: Fortschritt/Tool-Calls live loggen
+            // stderr: Fehler/Warnungen loggen
             Thread stderrThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        log.info("{} {}", cardLabel, line);
+                        log.warn("{}[stderr] {}", cardLabel, line);
                     }
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Lesen von stderr", e);
@@ -169,14 +172,13 @@ public class ClaudeCodeRunner {
             }
 
             int exitCode = process.exitValue();
-            String rawOutput = stdout.toString().trim();
 
-            if (exitCode != 0) {
+            if (exitCode != 0 && resultLine.isEmpty()) {
                 log.error("ClaudeCodeRunner: Exitcode {} für Karte '{}'.", exitCode, task.getCardId());
-                return errorResult("❌ Claude Code fehlgeschlagen (Exit " + exitCode + "):\n" + rawOutput);
+                return errorResult("❌ Claude Code fehlgeschlagen (Exit " + exitCode + ").");
             }
 
-            RunResult result = parseJsonResult(rawOutput, task.getCardId());
+            RunResult result = parseResultLine(resultLine.toString().trim(), resultText.toString().trim(), task.getCardId());
             log.info("ClaudeCodeRunner: Abgeschlossen für Karte '{}' – Input: {}, Output: {}, Kosten: ${}",
                     task.getCardId(), result.inputTokens(), result.outputTokens(),
                     String.format("%.4f", result.costUsd()));
@@ -193,14 +195,108 @@ public class ClaudeCodeRunner {
         }
     }
 
+    // ── Stream-JSON Event-Logging ─────────────────────────────────────────────
+
+    /**
+     * Parsed eine JSONL-Zeile aus dem stream-json Output und loggt sie lesbar.
+     * Schreibt die result-Zeile in {@code resultLine} und den Assistant-Text in {@code resultText}.
+     */
+    private void logStreamEvent(String cardLabel, String line,
+                                StringBuilder resultLine, StringBuilder resultText) {
+        try {
+            JsonNode node = objectMapper.readTree(line);
+            String type = node.path("type").asText("");
+
+            switch (type) {
+                case "assistant" -> {
+                    // Enthält message.content[] mit type=text oder type=tool_use
+                    JsonNode content = node.path("message").path("content");
+                    if (content.isArray()) {
+                        for (JsonNode block : content) {
+                            String blockType = block.path("type").asText("");
+                            if ("text".equals(blockType)) {
+                                String text = block.path("text").asText("").strip();
+                                if (!text.isBlank()) {
+                                    log.info("{}[Claude] {}", cardLabel, text);
+                                    if (!resultText.isEmpty()) resultText.append("\n");
+                                    resultText.append(text);
+                                }
+                            } else if ("tool_use".equals(blockType)) {
+                                String toolName  = block.path("name").asText("?");
+                                JsonNode input   = block.path("input");
+                                String inputSummary = summarizeToolInput(toolName, input);
+                                log.info("{}[Tool] {} {}", cardLabel, toolName, inputSummary);
+                            }
+                        }
+                    }
+                }
+                case "tool_result" -> {
+                    // Tool-Ergebnisse sind oft groß – nur kurz loggen
+                    log.debug("{}[ToolResult] {}", cardLabel, line.substring(0, Math.min(200, line.length())));
+                }
+                case "result" -> {
+                    // Letzte Zeile: enthält session_id, usage, total_cost_usd, result-Text
+                    resultLine.setLength(0);
+                    resultLine.append(line);
+                    boolean isError = node.path("is_error").asBoolean(false);
+                    String resultTextFromNode = node.path("result").asText("").strip();
+                    if (!resultTextFromNode.isBlank()) {
+                        log.info("{}[Ergebnis] {}", cardLabel, resultTextFromNode);
+                        // Überschreibe mit dem finalen result-Text wenn vorhanden
+                        resultText.setLength(0);
+                        resultText.append(resultTextFromNode);
+                    }
+                    log.info("{}[Status] isError={}", cardLabel, isError);
+                }
+                case "system" -> {
+                    String subtype = node.path("subtype").asText("");
+                    if ("init".equals(subtype)) {
+                        log.info("{}[Init] Claude Code Session gestartet", cardLabel);
+                    }
+                }
+                default -> {
+                    // Unbekannte Event-Typen auf DEBUG
+                    log.debug("{}[{}] {}", cardLabel, type, line.substring(0, Math.min(200, line.length())));
+                }
+            }
+        } catch (Exception e) {
+            // Kein gültiges JSON (z.B. Statusmeldung) – direkt loggen
+            log.info("{}{}", cardLabel, line);
+        }
+    }
+
+    private String summarizeToolInput(String toolName, JsonNode input) {
+        return switch (toolName) {
+            case "Read"  -> input.path("file_path").asText(input.toString());
+            case "Write" -> input.path("file_path").asText(input.toString());
+            case "Edit"  -> input.path("file_path").asText(input.toString());
+            case "Bash"  -> {
+                String cmd = input.path("command").asText(input.toString());
+                yield cmd.length() > 120 ? cmd.substring(0, 120) + "…" : cmd;
+            }
+            case "Grep"  -> "pattern=" + input.path("pattern").asText("?");
+            case "Glob"  -> "pattern=" + input.path("pattern").asText("?");
+            default      -> input.toString().substring(0, Math.min(120, input.toString().length()));
+        };
+    }
+
     // ── JSON-Parsing ──────────────────────────────────────────────────────────
 
-    private RunResult parseJsonResult(String raw, String cardId) {
-        if (raw.isBlank()) {
-            return errorResult("✅ Claude Code abgeschlossen (keine Ausgabe).");
+    /**
+     * Parsed die finale result-Zeile aus dem stream-json Output.
+     * Fällt auf den gesammelten resultText zurück, wenn kein result-Text vorhanden.
+     */
+    private RunResult parseResultLine(String resultJson, String fallbackText, String cardId) {
+        if (resultJson.isBlank()) {
+            if (fallbackText.isBlank()) {
+                return errorResult("✅ Claude Code abgeschlossen (keine Ausgabe).");
+            }
+            // Kein result-Event, aber Text gesammelt
+            return new RunResult(fallbackText, "", 0, 0, 0, 0.0,
+                    false, false);
         }
         try {
-            JsonNode root = objectMapper.readTree(raw);
+            JsonNode root = objectMapper.readTree(resultJson);
 
             String  sessionId   = root.path("session_id").asText("");
             boolean isError     = root.path("is_error").asBoolean(false);
@@ -208,22 +304,25 @@ public class ClaudeCodeRunner {
 
             String text = root.path("result").asText("").trim();
             if (text.isBlank()) {
-                text = isError ? "❌ Claude Code meldete einen Fehler." : "✅ Claude Code abgeschlossen (keine Textausgabe).";
+                text = fallbackText.isBlank()
+                        ? (isError ? "❌ Claude Code meldete einen Fehler." : "✅ Claude Code abgeschlossen.")
+                        : fallbackText;
             }
 
-            JsonNode usage  = root.path("usage");
-            int inputTokens  = usage.path("input_tokens").asInt(0);
-            int outputTokens = usage.path("output_tokens").asInt(0);
-            int cacheRead    = usage.path("cache_read_input_tokens").asInt(0);
-            double cost      = root.path("total_cost_usd").asDouble(0.0);
+            JsonNode usage      = root.path("usage");
+            int inputTokens     = usage.path("input_tokens").asInt(0);
+            int outputTokens    = usage.path("output_tokens").asInt(0);
+            int cacheRead       = usage.path("cache_read_input_tokens").asInt(0);
+            double cost         = root.path("total_cost_usd").asDouble(0.0);
 
             boolean isRateLimit = isError && isRateLimitError(text + " " + subtype);
 
             return new RunResult(text, sessionId, inputTokens, outputTokens, cacheRead, cost, isError, isRateLimit);
 
         } catch (Exception e) {
-            log.warn("ClaudeCodeRunner: JSON-Parsing fehlgeschlagen für Karte '{}' – Rohausgabe wird verwendet.", cardId);
-            return new RunResult(raw, "", 0, 0, 0, 0.0, true, isRateLimitError(raw));
+            log.warn("ClaudeCodeRunner: JSON-Parsing fehlgeschlagen für Karte '{}'", cardId);
+            String text = fallbackText.isBlank() ? resultJson : fallbackText;
+            return new RunResult(text, "", 0, 0, 0, 0.0, true, isRateLimitError(resultJson));
         }
     }
 
