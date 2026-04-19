@@ -27,8 +27,6 @@ import java.util.concurrent.TimeUnit;
 public class ClaudeCodeRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ClaudeCodeRunner.class);
-    private static final long TIMEOUT_MINUTES = 5;
-
     private final AppProperties props;
     private final ObjectMapper  objectMapper = new ObjectMapper();
 
@@ -137,7 +135,8 @@ public class ClaudeCodeRunner {
             stdoutThread.start();
             stderrThread.start();
 
-            boolean finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            long timeoutMinutes = props.getClaudeCode().getTimeoutMinutes();
+            boolean finished = process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
             stdinThread.join();
             stdoutThread.join();
             stderrThread.join();
@@ -145,8 +144,8 @@ public class ClaudeCodeRunner {
             if (!finished) {
                 process.destroyForcibly();
                 log.error("ClaudeCodeRunner: Timeout nach {} Minuten für Karte '{}'",
-                        TIMEOUT_MINUTES, task.getCardId());
-                return errorResult("❌ Claude Code Timeout nach " + TIMEOUT_MINUTES + " Minuten.");
+                        timeoutMinutes, task.getCardId());
+                return errorResult("❌ Claude Code Timeout nach " + timeoutMinutes + " Minuten.");
             }
 
             int exitCode = process.exitValue();

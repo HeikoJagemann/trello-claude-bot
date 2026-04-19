@@ -18,6 +18,7 @@ app:
   claude-code:
     repo-path: ${CLAUDE_CODE_REPO_PATH:.}
     context-file: ${CLAUDE_CODE_CONTEXT_FILE:}   # optional: Pfad zu Kontext-/CLAUDE.md-Datei
+    timeout-minutes: 30                           # maximale Laufzeit pro Claude-Code-Aufruf
 
 logging:
   level:

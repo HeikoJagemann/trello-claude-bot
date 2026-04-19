@@ -59,11 +59,16 @@ public class AppProperties {
          */
         private String contextFile = "";
 
+        /** Maximale Laufzeit eines Claude-Code-Prozesses in Minuten. Standard: 30. */
+        private long timeoutMinutes = 30;
+
         public String getRepoPath()             { return repoPath; }
         public String getContextFile()          { return contextFile; }
+        public long   getTimeoutMinutes()       { return timeoutMinutes; }
 
         public void setRepoPath(String p)       { this.repoPath = p; }
         public void setContextFile(String f)    { this.contextFile = f; }
+        public void setTimeoutMinutes(long t)   { this.timeoutMinutes = t; }
     }
 
 }
