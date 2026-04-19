@@ -2,6 +2,7 @@ package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.client.TrelloClient;
 import com.example.trelloclaudebot.client.TrelloClient.BoardList;
+import com.example.trelloclaudebot.service.ClaudeCodeRunner.RunResult;
 import com.example.trelloclaudebot.client.TrelloClient.TrelloChecklistRead;
 import com.example.trelloclaudebot.client.TrelloClient.TrelloCustomField;
 import com.example.trelloclaudebot.config.AppProperties;
@@ -123,8 +124,15 @@ public class TaskOrchestratorService {
                 task.getListName(), refinementName);
 
         // Schritt 2 – Claude CLI aufrufen
-        String prompt   = promptBuilder.buildAnalysisPrompt(task);
-        String response = claudeCodeRunner.run(task, prompt);
+        String prompt      = promptBuilder.buildAnalysisPrompt(task);
+        RunResult runResult = claudeCodeRunner.run(task, prompt);
+        String response    = runResult.text();
+
+        if (runResult.hasTokenInfo()) {
+            log.info("Analyse-Tokens für Karte {}: Input={}, Output={}, Kosten=${}",
+                    task.getCardId(), runResult.inputTokens(), runResult.outputTokens(),
+                    String.format("%.4f", runResult.costUsd()));
+        }
 
         // Schritt 3 – JSON parsen und Karte befüllen
         AnalysisResult result = analysisResultParser.parse(response);
@@ -219,8 +227,8 @@ public class TaskOrchestratorService {
         String headBefore = gitService.getCurrentHead();
         log.debug("HEAD vor Implementierung: {}", headBefore);
 
-        String prompt  = promptBuilder.buildCodePrompt(enrichedTask);
-        String summary = claudeCodeRunner.run(enrichedTask, prompt);
+        String prompt      = promptBuilder.buildCodePrompt(enrichedTask);
+        RunResult runResult = claudeCodeRunner.run(enrichedTask, prompt);
 
         // Fallback: falls Claude Code nicht selbst commitet, Auto-Commit erstellen
         gitService.commitIfNeeded("Implementierung: " + task.getTitle());
@@ -229,8 +237,8 @@ public class TaskOrchestratorService {
         boolean pushed = gitService.push();
         List<String> newCommits = gitService.getCommitsSince(headBefore);
 
-        // Kommentar zusammenbauen: Summary + Commits
-        String comment = buildImplementationComment(summary, pushed, newCommits);
+        // Kommentar zusammenbauen: Summary + Commits + Token-Verbrauch
+        String comment = buildImplementationComment(runResult.text(), pushed, newCommits, runResult);
         trelloClient.addComment(task.getCardId(), comment);
         log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
 
@@ -279,7 +287,8 @@ public class TaskOrchestratorService {
         return items;
     }
 
-    private String buildImplementationComment(String summary, boolean pushed, List<String> commits) {
+    private String buildImplementationComment(String summary, boolean pushed,
+                                               List<String> commits, RunResult runResult) {
         StringBuilder sb = new StringBuilder();
         sb.append(summary.isBlank() ? "✅ Implementierung abgeschlossen." : summary.trim());
 
@@ -291,6 +300,8 @@ public class TaskOrchestratorService {
         if (!pushed) {
             sb.append("\n\n⚠️ `git push` fehlgeschlagen – bitte manuell pushen.");
         }
+
+        sb.append(runResult.tokenSummary());
 
         return sb.toString();
     }

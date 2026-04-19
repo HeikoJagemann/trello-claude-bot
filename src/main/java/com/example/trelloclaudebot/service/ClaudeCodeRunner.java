@@ -2,6 +2,8 @@ package com.example.trelloclaudebot.service;
 
 import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,41 +18,66 @@ import java.util.concurrent.TimeUnit;
 /**
  * Führt Claude Code CLI als Subprocess im konfigurierten Repo-Verzeichnis aus.
  *
- * Der Prompt wird über stdin an den Prozess übergeben (nicht als Argument),
- * um Probleme mit Sonderzeichen und Längenbeschränkungen auf Windows zu vermeiden.
- *
- * Optionaler Kontext: Ist {@code app.claude-code.context-file} konfiguriert,
- * wird der Inhalt dieser Datei jedem Prompt vorangestellt.
+ * Verwendet {@code --output-format json}, damit Token-Usage und Kosten aus dem
+ * JSON-Result ausgelesen werden können.
+ * stderr wird live geloggt (Claude Code schreibt dort Fortschritt/Tool-Calls).
+ * stdout (JSON) wird nach Abschluss geparst.
  */
 @Service
 public class ClaudeCodeRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ClaudeCodeRunner.class);
-
-    /** Maximale Wartezeit für einen Claude-Code-Lauf (5 Minuten). */
     private static final long TIMEOUT_MINUTES = 5;
 
     private final AppProperties props;
+    private final ObjectMapper  objectMapper = new ObjectMapper();
 
     public ClaudeCodeRunner(AppProperties props) {
         this.props = props;
     }
 
     /**
-     * Führt Claude Code mit dem übergebenen Prompt im konfigurierten Repo-Verzeichnis aus.
-     *
-     * @param task   Der zu verarbeitende Task (für Logging)
-     * @param prompt Der vollständige Prompt für Claude Code
-     * @return Ausgabe von Claude Code (stdout), oder eine Fehlermeldung
+     * Ergebnis eines Claude-Code-Laufs: Antworttext + Token-Verbrauch.
      */
-    public String run(InternalTask task, String prompt) {
+    public record RunResult(
+            String text,
+            int    inputTokens,
+            int    outputTokens,
+            int    cacheReadTokens,
+            double costUsd
+    ) {
+        /** Liefert true wenn Token-Daten vorhanden sind. */
+        public boolean hasTokenInfo() {
+            return inputTokens > 0 || outputTokens > 0;
+        }
+
+        /** Formatierter Token-Block für Trello-Kommentare. */
+        public String tokenSummary() {
+            if (!hasTokenInfo()) return "";
+            StringBuilder sb = new StringBuilder("\n\n---\n**Token-Verbrauch:**\n");
+            sb.append("- Input: ").append(inputTokens).append("\n");
+            sb.append("- Output: ").append(outputTokens).append("\n");
+            if (cacheReadTokens > 0) {
+                sb.append("- Cache-Read: ").append(cacheReadTokens).append("\n");
+            }
+            if (costUsd > 0) {
+                sb.append(String.format("- Kosten: $%.4f%n", costUsd));
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * Führt Claude Code aus und gibt Text + Token-Verbrauch zurück.
+     */
+    public RunResult run(InternalTask task, String prompt) {
         String repoPath = props.getClaudeCode().getRepoPath();
         File repoDir = new File(repoPath);
 
         if (!repoDir.exists() || !repoDir.isDirectory()) {
             String msg = "Repo-Verzeichnis nicht gefunden: " + repoPath;
             log.error("ClaudeCodeRunner: {}", msg);
-            return "❌ " + msg;
+            return errorResult("❌ " + msg);
         }
 
         String fullPrompt = buildFullPrompt(prompt);
@@ -59,9 +86,8 @@ public class ClaudeCodeRunner {
         log.debug("ClaudeCodeRunner: Prompt (ersten 200 Zeichen): {}",
                 fullPrompt.substring(0, Math.min(200, fullPrompt.length())));
 
-        // Prompt über stdin übergeben, nicht als Argument –
-        // vermeidet Escaping-Probleme mit <, >, {, } auf Windows
-        ProcessBuilder pb = new ProcessBuilder("claude", "-p", "--dangerously-skip-permissions");
+        ProcessBuilder pb = new ProcessBuilder(
+                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "json");
         pb.directory(repoDir);
         pb.redirectErrorStream(false);
 
@@ -69,11 +95,9 @@ public class ClaudeCodeRunner {
             Process process = pb.start();
 
             StringBuilder stdout = new StringBuilder();
-            StringBuilder stderr = new StringBuilder();
-
             String cardLabel = "[Karte " + task.getCardId() + "] ";
 
-            // stdin: Prompt schreiben und Stream schließen (EOF signalisiert Ende der Eingabe)
+            // stdin: Prompt schreiben und Stream schließen
             Thread stdinThread = new Thread(() -> {
                 try (OutputStream os = process.getOutputStream();
                      OutputStreamWriter writer = new OutputStreamWriter(os, StandardCharsets.UTF_8)) {
@@ -83,13 +107,12 @@ public class ClaudeCodeRunner {
                 }
             });
 
-            // stdout: jede Zeile sofort loggen + für Rückgabe sammeln
+            // stdout: JSON-Result sammeln (kein Live-Log, da ein einzelnes JSON-Objekt)
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        log.info("{}  {}", cardLabel, line);
                         stdout.append(line).append("\n");
                     }
                 } catch (IOException e) {
@@ -97,14 +120,13 @@ public class ClaudeCodeRunner {
                 }
             });
 
-            // stderr: jede Zeile sofort als WARN loggen
+            // stderr: Fortschritt/Tool-Calls live loggen
             Thread stderrThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        log.warn("{} ⚠ {}", cardLabel, line);
-                        stderr.append(line).append("\n");
+                        log.info("{} {}", cardLabel, line);
                     }
                 } catch (IOException e) {
                     log.warn("ClaudeCodeRunner: Fehler beim Lesen von stderr", e);
@@ -116,7 +138,6 @@ public class ClaudeCodeRunner {
             stderrThread.start();
 
             boolean finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES);
-
             stdinThread.join();
             stdoutThread.join();
             stderrThread.join();
@@ -125,48 +146,78 @@ public class ClaudeCodeRunner {
                 process.destroyForcibly();
                 log.error("ClaudeCodeRunner: Timeout nach {} Minuten für Karte '{}'",
                         TIMEOUT_MINUTES, task.getCardId());
-                return "❌ Claude Code Timeout nach " + TIMEOUT_MINUTES + " Minuten.";
+                return errorResult("❌ Claude Code Timeout nach " + TIMEOUT_MINUTES + " Minuten.");
             }
 
             int exitCode = process.exitValue();
-            String output    = stdout.toString().trim();
-            String errOutput = stderr.toString().trim();
+            String rawOutput = stdout.toString().trim();
 
             if (exitCode != 0) {
                 log.error("ClaudeCodeRunner: Exitcode {} für Karte '{}'.", exitCode, task.getCardId());
-                return "❌ Claude Code fehlgeschlagen (Exit " + exitCode + "):\n" + errOutput;
+                return errorResult("❌ Claude Code fehlgeschlagen (Exit " + exitCode + "):\n" + rawOutput);
             }
 
-            log.info("ClaudeCodeRunner: Erfolgreich abgeschlossen für Karte '{}'", task.getCardId());
-            return output.isBlank() ? "✅ Claude Code abgeschlossen (keine Ausgabe)." : output;
+            RunResult result = parseJsonResult(rawOutput, task.getCardId());
+            log.info("ClaudeCodeRunner: Abgeschlossen für Karte '{}' – Input: {}, Output: {}, Kosten: ${}",
+                    task.getCardId(), result.inputTokens(), result.outputTokens(),
+                    String.format("%.4f", result.costUsd()));
+            return result;
 
         } catch (IOException e) {
             log.error("ClaudeCodeRunner: Konnte Claude Code nicht starten – ist 'claude' im PATH?", e);
-            return "❌ Claude Code konnte nicht gestartet werden: " + e.getMessage()
-                    + "\nHinweis: Ist die Claude Code CLI installiert und im PATH?";
+            return errorResult("❌ Claude Code konnte nicht gestartet werden: " + e.getMessage()
+                    + "\nHinweis: Ist die Claude Code CLI installiert und im PATH?");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("ClaudeCodeRunner: Unterbrochen", e);
-            return "❌ Claude Code wurde unterbrochen.";
+            return errorResult("❌ Claude Code wurde unterbrochen.");
         }
     }
 
-    /**
-     * Stellt den optionalen Kontext-Text aus der konfigurierten Datei
-     * dem eigentlichen Prompt voran.
-     */
+    // ── JSON-Parsing ──────────────────────────────────────────────────────────
+
+    private RunResult parseJsonResult(String raw, String cardId) {
+        if (raw.isBlank()) {
+            return errorResult("✅ Claude Code abgeschlossen (keine Ausgabe).");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(raw);
+
+            String text = root.path("result").asText("").trim();
+            if (text.isBlank()) {
+                text = "✅ Claude Code abgeschlossen (keine Textausgabe).";
+            }
+
+            JsonNode usage = root.path("usage");
+            int inputTokens     = usage.path("input_tokens").asInt(0);
+            int outputTokens    = usage.path("output_tokens").asInt(0);
+            int cacheRead       = usage.path("cache_read_input_tokens").asInt(0);
+            double cost         = root.path("total_cost_usd").asDouble(0.0);
+
+            return new RunResult(text, inputTokens, outputTokens, cacheRead, cost);
+
+        } catch (Exception e) {
+            log.warn("ClaudeCodeRunner: JSON-Parsing fehlgeschlagen für Karte '{}' – Rohausgabe wird verwendet.", cardId);
+            return errorResult(raw);
+        }
+    }
+
+    private static RunResult errorResult(String message) {
+        return new RunResult(message, 0, 0, 0, 0.0);
+    }
+
+    // ── Kontext-Datei ─────────────────────────────────────────────────────────
+
     private String buildFullPrompt(String prompt) {
         String contextFile = props.getClaudeCode().getContextFile();
         if (contextFile == null || contextFile.isBlank()) {
             return prompt;
         }
-
         Path path = Paths.get(contextFile);
         if (!Files.exists(path)) {
             log.warn("ClaudeCodeRunner: Kontext-Datei '{}' nicht gefunden – wird ignoriert.", contextFile);
             return prompt;
         }
-
         try {
             String context = Files.readString(path, StandardCharsets.UTF_8).strip();
             log.debug("ClaudeCodeRunner: Kontext-Datei '{}' geladen ({} Zeichen).", contextFile, context.length());
