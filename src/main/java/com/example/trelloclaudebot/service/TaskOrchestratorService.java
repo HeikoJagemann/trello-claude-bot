@@ -16,8 +16,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class TaskOrchestratorService {
@@ -212,8 +214,9 @@ public class TaskOrchestratorService {
     private void processImplementation(InternalTask task) {
         log.info("Modus: Implementierung via Claude Code CLI (Liste: '{}')", task.getListName());
 
-        // Nur noch offene Akzeptanzkriterien laden (bereits erledigte werden gefiltert)
-        List<String> akzeptanzkriterien = fetchAkzeptanzkriterien(task.getCardId());
+        // Offene Akzeptanzkriterien mit IDs laden
+        List<CheckItemRef> checkItems = fetchIncompleteCheckItems(task.getCardId());
+        List<String> kriterienNamen = checkItems.stream().map(CheckItemRef::displayName).toList();
 
         InternalTask enrichedTask = new InternalTask(
                 task.getCardId(),
@@ -221,13 +224,13 @@ public class TaskOrchestratorService {
                 task.getDescription(),
                 task.getActionType(),
                 task.getListName(),
-                akzeptanzkriterien
+                kriterienNamen
         );
 
         String headBefore = gitService.getCurrentHead();
         log.debug("HEAD vor Implementierung: {}", headBefore);
 
-        String prompt      = promptBuilder.buildCodePrompt(enrichedTask);
+        String prompt       = promptBuilder.buildCodePrompt(enrichedTask);
         RunResult runResult = claudeCodeRunner.run(enrichedTask, prompt);
 
         // Fallback: falls Claude Code nicht selbst commitet, Auto-Commit erstellen
@@ -242,49 +245,86 @@ public class TaskOrchestratorService {
         trelloClient.addComment(task.getCardId(), comment);
         log.info("Implementierung für Karte {} abgeschlossen.", task.getCardId());
 
-        // Alle Akzeptanzkriterien abhaken
-        List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(task.getCardId());
-        if (!checklists.isEmpty()) {
-            log.info("Hake alle Checklisteneinträge auf Karte {} ab.", task.getCardId());
-            trelloClient.checkAllCheckItems(task.getCardId(), checklists);
-        }
-
-        // Karte in QA-Liste verschieben
-        moveCardToQa(task.getCardId());
-    }
-
-    /**
-     * Holt alle Checklisten-Items der Karte und gibt sie als flache Liste zurück.
-     * Mehrere Checklisten werden zusammengeführt (mit Checklisten-Name als Prefix falls > 1).
-     */
-    /**
-     * Holt alle noch nicht abgehakten Checklisten-Items der Karte.
-     * Bereits erledigte Items (state=complete) werden übersprungen –
-     * der Bot soll nur offene Punkte bearbeiten.
-     */
-    private List<String> fetchAkzeptanzkriterien(String cardId) {
-        List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(cardId);
-        if (checklists.isEmpty()) return java.util.Collections.emptyList();
-
-        boolean multipleChecklists = checklists.size() > 1;
-        List<String> items = new java.util.ArrayList<>();
-
-        for (TrelloChecklistRead checklist : checklists) {
-            for (TrelloChecklistRead.CheckItem item : checklist.getCheckItems()) {
-                if ("complete".equals(item.getState())) {
-                    log.debug("Akzeptanzkriterium bereits erledigt, wird übersprungen: '{}'", item.getName());
-                    continue;
-                }
-                if (multipleChecklists) {
-                    items.add("[" + checklist.getName() + "] " + item.getName());
-                } else {
-                    items.add(item.getName());
+        // Nur erledigte Akzeptanzkriterien abhaken
+        if (!checkItems.isEmpty()) {
+            Set<Integer> erledigtIndices = parseErledigtIndices(runResult.text(), checkItems.size());
+            if (erledigtIndices.isEmpty()) {
+                log.info("Keine ERLEDIGT-Zeile in der Ausgabe – keine Kriterien werden abgehakt.");
+            } else {
+                log.info("Hake {} von {} Kriterien auf Karte {} ab: {}",
+                        erledigtIndices.size(), checkItems.size(), task.getCardId(), erledigtIndices);
+                for (int i = 0; i < checkItems.size(); i++) {
+                    if (erledigtIndices.contains(i + 1)) {
+                        CheckItemRef ref = checkItems.get(i);
+                        trelloClient.markCheckItemComplete(task.getCardId(), ref.checklistId(), ref.itemId());
+                    }
                 }
             }
         }
 
-        log.info("{} offene Akzeptanzkriterien für Karte {} geladen.", items.size(), cardId);
-        return items;
+        // Karte in QA-Liste verschieben – nur wenn alle Kriterien erledigt
+        List<CheckItemRef> nochOffen = fetchIncompleteCheckItems(task.getCardId());
+        if (nochOffen.isEmpty()) {
+            log.info("Alle Kriterien erledigt – verschiebe Karte {} in QA.", task.getCardId());
+            moveCardToQa(task.getCardId());
+        } else {
+            log.info("{} Kriterien noch offen – Karte {} bleibt in Sprint.",
+                    nochOffen.size(), task.getCardId());
+        }
+    }
+
+    /** Referenz auf ein einzelnes Checklist-Item inkl. IDs für die Trello API. */
+    private record CheckItemRef(String checklistId, String itemId, String displayName) {}
+
+    /**
+     * Gibt alle noch nicht abgehakten Checklist-Items zurück, mit Checklist- und Item-ID
+     * für das selektive Abhaken nach der Implementierung.
+     */
+    private List<CheckItemRef> fetchIncompleteCheckItems(String cardId) {
+        List<TrelloChecklistRead> checklists = trelloClient.fetchCardChecklists(cardId);
+        if (checklists.isEmpty()) return java.util.Collections.emptyList();
+
+        boolean multipleChecklists = checklists.size() > 1;
+        List<CheckItemRef> refs = new java.util.ArrayList<>();
+
+        for (TrelloChecklistRead checklist : checklists) {
+            for (TrelloChecklistRead.CheckItem item : checklist.getCheckItems()) {
+                if ("complete".equals(item.getState())) continue;
+                String displayName = multipleChecklists
+                        ? "[" + checklist.getName() + "] " + item.getName()
+                        : item.getName();
+                refs.add(new CheckItemRef(checklist.getId(), item.getId(), displayName));
+            }
+        }
+
+        log.info("{} offene Akzeptanzkriterien für Karte {} geladen.", refs.size(), cardId);
+        return refs;
+    }
+
+    /**
+     * Parst die "ERLEDIGT: 1, 2, 3"-Zeile aus Claudes Ausgabe.
+     * Gibt die 1-basierten Indices der erledigten Kriterien zurück.
+     */
+    private Set<Integer> parseErledigtIndices(String output, int totalItems) {
+        Set<Integer> indices = new HashSet<>();
+        if (output == null || output.isBlank()) return indices;
+
+        for (String line : output.lines().toList()) {
+            String trimmed = line.trim();
+            if (trimmed.toUpperCase().startsWith("ERLEDIGT:")) {
+                String numberPart = trimmed.substring("ERLEDIGT:".length()).trim();
+                for (String token : numberPart.split("[,\\s]+")) {
+                    try {
+                        int idx = Integer.parseInt(token.trim());
+                        if (idx >= 1 && idx <= totalItems) {
+                            indices.add(idx);
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+                break;
+            }
+        }
+        return indices;
     }
 
     private String buildImplementationComment(String summary, boolean pushed,

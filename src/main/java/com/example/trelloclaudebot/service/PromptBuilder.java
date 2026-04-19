@@ -99,7 +99,18 @@ public class PromptBuilder {
             return "";
         }
         StringBuilder sb = new StringBuilder("\n**Definition of Done (Akzeptanzkriterien):**\n");
-        task.getAkzeptanzkriterien().forEach(k -> sb.append("- ").append(k).append("\n"));
+        List<String> kriterien = task.getAkzeptanzkriterien();
+        for (int i = 0; i < kriterien.size(); i++) {
+            sb.append(i + 1).append(". ").append(kriterien.get(i)).append("\n");
+        }
+        sb.append("""
+
+                **WICHTIG – Abschlusszeile:** Gib in der allerletzten Zeile deiner Antwort an, \
+                welche Akzeptanzkriterien du tatsächlich erfüllt hast:
+                ERLEDIGT: 1, 2, 3
+                (Nur die Nummern der wirklich erledigten Kriterien, kommagetrennt. \
+                Nicht erledigte Kriterien weglassen.)
+                """);
         return sb.toString();
     }
 }

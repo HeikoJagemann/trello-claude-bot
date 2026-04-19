@@ -595,7 +595,7 @@ public class TrelloClient {
         }
     }
 
-    private void markCheckItemComplete(String cardId, String checklistId, String checkItemId) {
+    public void markCheckItemComplete(String cardId, String checklistId, String checkItemId) {
         try {
             webClient.put()
                     .uri(uriBuilder -> uriBuilder
