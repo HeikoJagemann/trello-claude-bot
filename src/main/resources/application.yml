@@ -12,6 +12,7 @@ app:
     ready-label-name: Refined            # Dieses Label wird nach der Analyse gesetzt
     story-points-field-name: Story Points  # Name des Custom Fields für Story Points
     sprint-list-name: Sprint               # Karten in dieser Liste werden implementiert
+    bugs-list-name: Bugs                   # Karten in dieser Liste werden direkt (höher priorisiert) implementiert
     qa-list-name: QA                       # Karte wird nach erfolgreicher Implementierung hierher verschoben
     base-url: https://api.trello.com/1
 

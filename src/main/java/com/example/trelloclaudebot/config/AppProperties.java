@@ -22,6 +22,7 @@ public class AppProperties {
         private String readyLabelName       = "Refined";
         private String storyPointsFieldName = "Story Points";
         private String sprintListName       = "Sprint";
+        private String bugsListName         = "Bugs";
         private String qaListName           = "QA";
 
         public String getApiKey()              { return apiKey; }
@@ -34,6 +35,7 @@ public class AppProperties {
         public String getReadyLabelName()       { return readyLabelName; }
         public String getStoryPointsFieldName() { return storyPointsFieldName; }
         public String getSprintListName()       { return sprintListName; }
+        public String getBugsListName()         { return bugsListName; }
         public String getQaListName()           { return qaListName; }
 
         public void setApiKey(String apiKey)                       { this.apiKey = apiKey; }
@@ -46,6 +48,7 @@ public class AppProperties {
         public void setReadyLabelName(String name)                  { this.readyLabelName = name; }
         public void setStoryPointsFieldName(String name)            { this.storyPointsFieldName = name; }
         public void setSprintListName(String name)                  { this.sprintListName = name; }
+        public void setBugsListName(String name)                    { this.bugsListName = name; }
         public void setQaListName(String name)                      { this.qaListName = name; }
     }
 

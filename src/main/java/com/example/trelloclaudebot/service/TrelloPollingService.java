@@ -69,11 +69,10 @@ public class TrelloPollingService {
      * Scannt beim Start alle relevanten Listen und verarbeitet vorhandene Karten sofort,
      * ohne dass eine Änderung an der Karte nötig ist.
      *
-     * Sprint-Liste: alle Karten werden implementiert.
-     * Backlog-Liste: nur Karten mit "Refinement"-Label werden analysiert.
+     * Reihenfolge (Priorität): Bugs → Sprint → Backlog (nur mit "Refinement"-Label).
      */
     private void scanExistingCards() {
-        log.info("Startup-Scan: Suche vorhandene Karten in Sprint- und Backlog-Liste...");
+        log.info("Startup-Scan: Suche vorhandene Karten in Bugs-, Sprint- und Backlog-Liste...");
 
         List<BoardList> lists = trelloClient.fetchBoardLists();
         if (lists.isEmpty()) {
@@ -81,48 +80,71 @@ public class TrelloPollingService {
             return;
         }
 
-        String sprintName    = props.getTrello().getSprintListName();
-        String backlogName   = props.getTrello().getBacklogListName();
+        String bugsName       = props.getTrello().getBugsListName();
+        String sprintName     = props.getTrello().getSprintListName();
+        String backlogName    = props.getTrello().getBacklogListName();
         String refinementName = props.getTrello().getRefinementLabelName();
 
-        for (BoardList list : lists) {
-            if (sprintName.equalsIgnoreCase(list.getName())) {
-                List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
-                log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), sprintName);
-                for (TrelloCardData card : cards) {
-                    log.info("Startup-Scan: Verarbeite Sprint-Karte '{}'", card.getName());
-                    try {
-                        orchestratorService.processCard(card, sprintName);
-                        markProcessed(card.getId());
-                    } catch (Exception e) {
-                        log.error("Startup-Scan: Fehler bei Karte '{}'", card.getName(), e);
-                    }
-                }
-
-            } else if (backlogName.equalsIgnoreCase(list.getName())) {
-                List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
-                log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), backlogName);
-                for (TrelloCardData card : cards) {
-                    List<TrelloLabel> labels = trelloClient.fetchCardLabels(card.getId());
-                    boolean hasRefinement = labels.stream()
-                            .anyMatch(l -> refinementName.equalsIgnoreCase(l.getName()));
-                    if (!hasRefinement) {
-                        log.debug("Startup-Scan: Karte '{}' hat kein '{}'-Label – übersprungen.",
-                                card.getName(), refinementName);
-                        continue;
-                    }
-                    log.info("Startup-Scan: Verarbeite Backlog-Karte '{}'", card.getName());
-                    try {
-                        orchestratorService.processCard(card, backlogName);
-                        markProcessed(card.getId());
-                    } catch (Exception e) {
-                        log.error("Startup-Scan: Fehler bei Karte '{}'", card.getName(), e);
-                    }
+        // Bugs zuerst (höchste Priorität)
+        findList(lists, bugsName).ifPresent(list -> {
+            List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
+            log.info("Startup-Scan: {} Karte(n) in '{}' gefunden (hohe Priorität).", cards.size(), bugsName);
+            for (TrelloCardData card : cards) {
+                log.info("Startup-Scan: Verarbeite Bug-Karte '{}'", card.getName());
+                try {
+                    orchestratorService.processCard(card, bugsName);
+                    markProcessed(card.getId());
+                } catch (Exception e) {
+                    log.error("Startup-Scan: Fehler bei Bug-Karte '{}'", card.getName(), e);
                 }
             }
-        }
+        });
+
+        // Sprint
+        findList(lists, sprintName).ifPresent(list -> {
+            List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
+            log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), sprintName);
+            for (TrelloCardData card : cards) {
+                log.info("Startup-Scan: Verarbeite Sprint-Karte '{}'", card.getName());
+                try {
+                    orchestratorService.processCard(card, sprintName);
+                    markProcessed(card.getId());
+                } catch (Exception e) {
+                    log.error("Startup-Scan: Fehler bei Sprint-Karte '{}'", card.getName(), e);
+                }
+            }
+        });
+
+        // Backlog (nur Refinement-Karten)
+        findList(lists, backlogName).ifPresent(list -> {
+            List<TrelloCardData> cards = trelloClient.fetchCardsInList(list.getId());
+            log.info("Startup-Scan: {} Karte(n) in '{}' gefunden.", cards.size(), backlogName);
+            for (TrelloCardData card : cards) {
+                List<TrelloLabel> labels = trelloClient.fetchCardLabels(card.getId());
+                boolean hasRefinement = labels.stream()
+                        .anyMatch(l -> refinementName.equalsIgnoreCase(l.getName()));
+                if (!hasRefinement) {
+                    log.debug("Startup-Scan: Karte '{}' hat kein '{}'-Label – übersprungen.",
+                            card.getName(), refinementName);
+                    continue;
+                }
+                log.info("Startup-Scan: Verarbeite Backlog-Karte '{}'", card.getName());
+                try {
+                    orchestratorService.processCard(card, backlogName);
+                    markProcessed(card.getId());
+                } catch (Exception e) {
+                    log.error("Startup-Scan: Fehler bei Backlog-Karte '{}'", card.getName(), e);
+                }
+            }
+        });
 
         log.info("Startup-Scan abgeschlossen.");
+    }
+
+    private Optional<BoardList> findList(List<BoardList> lists, String name) {
+        return lists.stream()
+                .filter(l -> name.equalsIgnoreCase(l.getName()))
+                .findFirst();
     }
 
     @Scheduled(fixedDelayString = "${app.trello.poll-interval-ms:30000}")
@@ -136,27 +158,68 @@ public class TrelloPollingService {
             log.debug("Keine neuen Actions gefunden.");
         } else {
             log.info("{} neue Action(s) gefunden – starte Verarbeitung.", actions.size());
-            // Trello liefert neueste zuerst → umgekehrt verarbeiten (chronologisch)
-            for (int i = actions.size() - 1; i >= 0; i--) {
-                TrelloAction action = actions.get(i);
 
-                if (processedActionIds.contains(action.getId())) {
-                    log.debug("Action {} bereits verarbeitet – übersprungen.", action.getId());
-                    continue;
+            String bugsName = props.getTrello().getBugsListName();
+
+            // Trello liefert neueste zuerst → chronologisch sortieren,
+            // dann Bug-Actions vor allen anderen verarbeiten (Priorität).
+            List<TrelloAction> chronological = new java.util.ArrayList<>(actions);
+            java.util.Collections.reverse(chronological);
+
+            List<TrelloAction> bugActions   = new java.util.ArrayList<>();
+            List<TrelloAction> otherActions = new java.util.ArrayList<>();
+            for (TrelloAction action : chronological) {
+                if (processedActionIds.contains(action.getId())) continue;
+                String listName = extractListNameFromAction(action);
+                if (bugsName.equalsIgnoreCase(listName)) {
+                    bugActions.add(action);
+                } else {
+                    otherActions.add(action);
                 }
+            }
 
+            if (!bugActions.isEmpty()) {
+                log.info("{} Bug-Action(s) werden priorisiert verarbeitet.", bugActions.size());
+            }
+
+            for (TrelloAction action : bugActions) {
+                log.info("Verarbeite Bug-Action: type={}, id={}", action.getType(), action.getId());
+                try {
+                    orchestratorService.process(action);
+                } catch (Exception e) {
+                    log.error("Fehler bei Verarbeitung von Bug-Action {}", action.getId(), e);
+                }
+                markProcessed(action.getId());
+            }
+
+            for (TrelloAction action : otherActions) {
                 log.info("Verarbeite Action: type={}, id={}", action.getType(), action.getId());
                 try {
                     orchestratorService.process(action);
                 } catch (Exception e) {
                     log.error("Fehler bei Verarbeitung von Action {}", action.getId(), e);
                 }
-
                 markProcessed(action.getId());
             }
         }
 
         lastPollTime = pollStart;
+    }
+
+    /**
+     * Liest den Listennamen aus einer Action ohne API-Call.
+     * Gibt einen leeren String zurück, wenn nicht ermittelbar.
+     */
+    private String extractListNameFromAction(TrelloAction action) {
+        if (action.getData() == null) return "";
+        var list = action.getData().getList();
+        if (list != null && list.getName() != null) return list.getName();
+        var card = action.getData().getCard();
+        if (card != null && card.getIdList() != null) {
+            // idList ist keine Listenname – wir können hier keinen API-Call machen (Performance).
+            // Daher: unbekannt → nicht als Bug-Action behandeln.
+        }
+        return "";
     }
 
     /** Merkt eine Action-ID als verarbeitet und begrenzt die Set-Größe. */

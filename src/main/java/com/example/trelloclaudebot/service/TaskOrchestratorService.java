@@ -100,11 +100,17 @@ public class TaskOrchestratorService {
 
         if (isBacklog(listName)) {
             processAnalysis(task);
+        } else if (isBugs(listName)) {
+            log.info("Modus: Bug-Fix via Claude Code CLI (Liste: '{}') – hohe Priorität", task.getListName());
+            processImplementation(task);
         } else if (isSprint(listName)) {
             processImplementation(task);
         } else {
-            log.info("Liste '{}' wird nicht verarbeitet – nur '{}' und '{}' sind aktiv.",
-                    listName, props.getTrello().getBacklogListName(), props.getTrello().getSprintListName());
+            log.info("Liste '{}' wird nicht verarbeitet – aktive Listen: '{}', '{}', '{}'.",
+                    listName,
+                    props.getTrello().getBacklogListName(),
+                    props.getTrello().getBugsListName(),
+                    props.getTrello().getSprintListName());
         }
     }
 
@@ -436,6 +442,10 @@ public class TaskOrchestratorService {
 
     private boolean isSprint(String listName) {
         return props.getTrello().getSprintListName().equalsIgnoreCase(listName);
+    }
+
+    private boolean isBugs(String listName) {
+        return props.getTrello().getBugsListName().equalsIgnoreCase(listName);
     }
 
     private void moveCardToQa(String cardId) {
