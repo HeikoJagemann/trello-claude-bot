@@ -26,3 +26,10 @@ app:
 logging:
   level:
     com.example.trelloclaudebot: DEBUG
+  file:
+    name: ${LOG_FILE:logs/trello-claude-bot.log}   # Pfad konfigurierbar per Env-Variable LOG_FILE
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB          # neue Datei nach 10 MB
+      max-history: 14              # Logs der letzten 14 Tage behalten
+      file-name-pattern: ${LOG_FILE:logs/trello-claude-bot}.%d{yyyy-MM-dd}.%i.log
