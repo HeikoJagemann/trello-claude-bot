@@ -25,18 +25,25 @@ public class PromptBuilder {
         String repoHinweis = buildRepoHinweis();
 
         return """
-                Du bist ein erfahrener Agile Coach und Software-Architekt.
-                Analysiere die folgende Aufgabe aus dem Backlog und erstelle eine strukturierte \
-                Aufwandsschätzung. Antworte ausschließlich auf Deutsch.
+                Du bist ein erfahrener Softwareentwickler, der ein Backlog-Refinement durchführt. \
+                Deine Aufgabe ist es, eine User Story technisch zu analysieren, den Aufwand auf \
+                Basis des tatsächlichen Codes realistisch einzuschätzen und konkrete, testbare \
+                Akzeptanzkriterien zu formulieren. Antworte ausschließlich auf Deutsch.
 
-                WICHTIG – CODEANALYSE ZUERST:
-                Bevor du die Aufwandsschätzung erstellst, verschaffe dir einen Überblick über den \
-                tatsächlichen Code in ALLEN Projekten des Verbunds. Nutze deine Tools \
-                (Glob, Grep, Read), um die relevanten Dateien zu finden und zu lesen. \
-                Mache keine Annahmen über vorhandene Klassen, Methoden oder Datenstrukturen \
-                – prüfe sie direkt im Code.
+                SCHRITT 1 – CODE LESEN:
+                Verschaffe dir zuerst einen genauen Überblick über den tatsächlichen Code in \
+                ALLEN Projekten des Verbunds. Nutze deine Tools (Glob, Grep, Read), um alle \
+                relevanten Dateien zu finden und zu lesen. Mache keine Annahmen über vorhandene \
+                Klassen, Methoden, Datenstrukturen oder Architektur – prüfe alles direkt im Code.
                 %s
-                Nur auf Basis des tatsächlichen Codes schätze Aufwand und formuliere Akzeptanzkriterien.
+                Typische Sucheinstiege:
+                - Grep nach Schlüsselbegriffen aus dem Kartentitel (Entitätsnamen, Feature-Namen)
+                - Read der gefundenen Controller, Services, DTOs, Entities, GDScript-Dateien, \
+                WPF-ViewModels etc.
+                - Prüfe, welche Teile bereits vorhanden sind und was noch fehlt
+
+                SCHRITT 2 – EINSCHÄTZEN UND AUSGEBEN:
+                Nur auf Basis des gelesenen Codes schätze Aufwand und formuliere Akzeptanzkriterien.
 
                 WICHTIG – AUSGABE:
                 Deine Antwort besteht ausschließlich aus einem einzigen JSON-Objekt. \
