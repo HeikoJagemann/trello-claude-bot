@@ -349,7 +349,7 @@ public class ClaudeCodeRunner {
      * 3. Stellt den kombinierten Kontext dem eigentlichen Prompt voran
      */
     private String buildFullPrompt(String prompt) {
-        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+        List<AppProperties.Repo> repos = props.getClaudeCode().getRepos();
 
         if (!repos.isEmpty()) {
             return buildRepoContext(repos) + prompt;
@@ -379,11 +379,11 @@ public class ClaudeCodeRunner {
      * Liest die CLAUDE.md aus jedem konfigurierten Repo und kombiniert sie
      * zu einem einzigen Kontext-Block, der dem Prompt vorangestellt wird.
      */
-    private String buildRepoContext(List<AppProperties.ClaudeCode.Repo> repos) {
+    private String buildRepoContext(List<AppProperties.Repo> repos) {
         StringBuilder context = new StringBuilder();
         int loaded = 0;
 
-        for (AppProperties.ClaudeCode.Repo repo : repos) {
+        for (AppProperties.Repo repo : repos) {
             if (repo.getPath() == null || repo.getPath().isBlank()) continue;
 
             Path claudeMd = Paths.get(repo.getPath(), "CLAUDE.md");
@@ -408,7 +408,7 @@ public class ClaudeCodeRunner {
 
         if (loaded > 0) {
             log.info("ClaudeCodeRunner: Kontext aus {} Repo(s) geladen: {}",
-                    loaded, repos.stream().map(AppProperties.ClaudeCode.Repo::getName).toList());
+                    loaded, repos.stream().map(AppProperties.Repo::getName).toList());
         } else {
             log.warn("ClaudeCodeRunner: Keine CLAUDE.md in konfigurierten Repos gefunden.");
         }

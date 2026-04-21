@@ -130,12 +130,12 @@ public class PromptBuilder {
      * Hinweis für den Analyse-Prompt: welche Repos es gibt und wo sie liegen.
      */
     private String buildRepoHinweis() {
-        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+        List<AppProperties.Repo> repos = props.getClaudeCode().getRepos();
         if (repos.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder(
                 "Die folgenden Repositories gehören zum Projektverbund – suche in allen nach relevantem Code:\n");
-        for (AppProperties.ClaudeCode.Repo repo : repos) {
+        for (AppProperties.Repo repo : repos) {
             sb.append("- **").append(repo.getName()).append("**: `").append(repo.getPath()).append("`\n");
         }
         return sb.toString();
@@ -145,14 +145,14 @@ public class PromptBuilder {
      * Regeln für den Implementierungs-Prompt: alle Repos prüfen, kein vorzeitiges Fertig.
      */
     private String buildRepoRegeln() {
-        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+        List<AppProperties.Repo> repos = props.getClaudeCode().getRepos();
         if (repos.isEmpty()) {
             return "- Lies zuerst die relevanten Dateien, bevor du Änderungen vornimmst";
         }
 
         StringBuilder sb = new StringBuilder();
         sb.append("- Lies zuerst die relevanten Dateien in ALLEN Repos des Projektverbunds:\n");
-        for (AppProperties.ClaudeCode.Repo repo : repos) {
+        for (AppProperties.Repo repo : repos) {
             sb.append("    * **").append(repo.getName()).append("**: `").append(repo.getPath()).append("`\n");
         }
         sb.append("- Prüfe für jedes Repo explizit, ob dort Änderungen nötig sind. ")
