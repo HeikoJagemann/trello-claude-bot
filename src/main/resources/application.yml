@@ -17,8 +17,15 @@ app:
     base-url: https://api.trello.com/1
 
   claude-code:
-    repo-path: ${CLAUDE_CODE_REPO_PATH:.}
-    context-file: ${CLAUDE_CODE_CONTEXT_FILE:}   # optional: Pfad zu Kontext-/CLAUDE.md-Datei
+    repo-path: ${CLAUDE_CODE_REPO_PATH:D:/git/FM-Backend}   # Arbeitsverzeichnis für Claude Code CLI
+    repos:                                                    # alle Repos des Projektverbunds
+      - name: FM-Backend
+        path: ${FM_BACKEND_PATH:D:/git/FM-Backend}
+      - name: FM-Frontend
+        path: ${FM_FRONTEND_PATH:D:/git/FM-Frontend}
+      - name: FM-Desktop
+        path: ${FM_DESKTOP_PATH:D:/git/FM-Desktop}
+    context-file: ${CLAUDE_CODE_CONTEXT_FILE:}   # Fallback: einzelne Kontext-Datei (wenn keine repos konfiguriert)
     timeout-minutes: 30                           # maximale Laufzeit pro Claude-Code-Aufruf
     max-retries: 5                                # maximale Wiederholungsversuche bei unvollständigem Ergebnis
     rate-limit-wait-minutes: 240                  # Wartezeit nach Token-Erschöpfung (4 Stunden)

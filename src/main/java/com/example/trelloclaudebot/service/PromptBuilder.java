@@ -1,5 +1,6 @@
 package com.example.trelloclaudebot.service;
 
+import com.example.trelloclaudebot.config.AppProperties;
 import com.example.trelloclaudebot.dto.internal.InternalTask;
 import org.springframework.stereotype.Service;
 
@@ -8,6 +9,12 @@ import java.util.List;
 @Service
 public class PromptBuilder {
 
+    private final AppProperties props;
+
+    public PromptBuilder(AppProperties props) {
+        this.props = props;
+    }
+
     /**
      * Analyse-Prompt für Backlog-Karten.
      * Claude gibt ein JSON-Objekt zurück, das von {@code AnalysisResultParser} verarbeitet wird.
@@ -15,6 +22,8 @@ public class PromptBuilder {
      * und Checkliste (Akzeptanzkriterien) in Trello eingetragen.
      */
     public String buildAnalysisPrompt(InternalTask task) {
+        String repoHinweis = buildRepoHinweis();
+
         return """
                 Du bist ein erfahrener Agile Coach und Software-Architekt.
                 Analysiere die folgende Aufgabe aus dem Backlog und erstelle eine strukturierte \
@@ -22,13 +31,11 @@ public class PromptBuilder {
 
                 WICHTIG – CODEANALYSE ZUERST:
                 Bevor du die Aufwandsschätzung erstellst, verschaffe dir einen Überblick über den \
-                tatsächlichen Code. Nutze deine Tools (Glob, Grep, Read), um die relevanten Dateien \
-                zu finden und zu lesen. Mache keine Annahmen über vorhandene Klassen, Methoden oder \
-                Datenstrukturen – prüfe sie direkt im Code.
-                Typische Sucheinstiege:
-                - Grep nach dem Schlüsselbegriff aus dem Kartentitel (z.B. Entitätsname, Feature-Name)
-                - Read der gefundenen Controller, Services, DTOs und Komponenten
-                - Bei Frontend-Aufgaben: Angular-Komponenten und Services lesen
+                tatsächlichen Code in ALLEN Projekten des Verbunds. Nutze deine Tools \
+                (Glob, Grep, Read), um die relevanten Dateien zu finden und zu lesen. \
+                Mache keine Annahmen über vorhandene Klassen, Methoden oder Datenstrukturen \
+                – prüfe sie direkt im Code.
+                %s
                 Nur auf Basis des tatsächlichen Codes schätze Aufwand und formuliere Akzeptanzkriterien.
 
                 WICHTIG – AUSGABE:
@@ -58,43 +65,36 @@ public class PromptBuilder {
                 Beschreibung:
                 %s
                 """.formatted(
+                repoHinweis,
                 task.getTitle(),
                 task.getDescription().isBlank() ? "(keine Beschreibung angegeben)" : task.getDescription()
         );
     }
 
     /**
-     * Code-Implementierungs-Prompt für alle Sprint-Listen.
-     * Wird direkt an Claude Code CLI übergeben – kein FILE:-Format nötig,
-     * Claude Code arbeitet über seine eigenen Tools (Read, Edit, Write, Bash, …)
-     * direkt im Repo.
+     * Code-Implementierungs-Prompt für Sprint- und Bugs-Listen.
+     * Wird direkt an Claude Code CLI übergeben – Claude Code arbeitet über seine eigenen
+     * Tools (Read, Edit, Write, Bash, …) direkt in den Repos.
      */
     public String buildCodePrompt(InternalTask task) {
-        String akSection = buildAkzeptanzkriterienSection(task);
+        String akSection    = buildAkzeptanzkriterienSection(task);
+        String repoRegeln   = buildRepoRegeln();
 
         return """
-                Du bist ein erfahrener Softwareentwickler. Du arbeitest in einem bestehenden Projekt. \
-                Nutze deine verfügbaren Tools (Read, Grep, Glob, Edit, Write, Bash), \
-                um dir zunächst einen Überblick über den relevanten Code zu verschaffen, \
-                und implementiere dann die folgende Aufgabe vollständig und produktionsreif.
+                Du bist ein erfahrener Softwareentwickler. Du arbeitest in einem Projektverbund \
+                aus mehreren Repositories. Nutze deine verfügbaren Tools (Read, Grep, Glob, Edit, \
+                Write, Bash), um dir zunächst einen Überblick über den relevanten Code zu \
+                verschaffen, und implementiere dann die folgende Aufgabe vollständig und \
+                produktionsreif.
 
                 Regeln:
-                - Lies zuerst die relevanten Dateien in ALLEN betroffenen Projekten (Backend, Frontend, Desktop), \
-                bevor du Änderungen vornimmst. Das Projekt besteht aus mehreren Repos – prüfe jeden Layer.
-                - Bei Aufgaben mit Anzeige/UI-Bezug (Wörter wie "anzeigen", "anzeige", "Oberfläche", \
-                "Frontend", "Komponente", "View", "UI"): Prüfe zwingend das FM-Frontend-Repo \
-                (Angular-Komponenten, Services, Templates). Backend-Änderungen allein reichen nicht.
-                - Prüfe für jedes Repo explizit, ob dort Änderungen nötig sind. Wenn ein Repo nicht \
-                betroffen ist, begründe kurz warum. Schließe kein Repo ohne Prüfung aus.
-                - "Der Code ist bereits implementiert" ist nur dann gültig, wenn du den Code in ALLEN \
-                betroffenen Repos gelesen und geprüft hast – Backend UND Frontend UND Desktop (falls relevant).
+                %s
                 - Halte dich an den bestehenden Code-Stil und die vorhandene Architektur
                 - Schreibe keinen Pseudocode und keine Platzhalter – der Code muss direkt lauffähig sein
                 - Alle Akzeptanzkriterien müssen erfüllt sein bevor du fertig bist
                 - Kompiliere nach jeder Änderung das betroffene Projekt (z.B. `mvn compile -q` \
-                für Maven, `dotnet build` für .NET, `./gradlew compileJava` für Gradle). \
-                Schlägt der Build fehl, behebe den Fehler bevor du weitermachst oder abschließt. \
-                Liefere keinen Code ab, der nicht kompiliert.
+                für Maven, `dotnet build` für .NET). Schlägt der Build fehl, behebe den Fehler \
+                bevor du weitermachst. Liefere keinen Code ab, der nicht kompiliert.
                 - Committe und pushe deine Änderungen am Ende in jedem betroffenen Projekt separat: \
                 `cd <projekt-pfad> && git add -A && git commit -m "<kurze Beschreibung>" && git push`. \
                 Ohne Commit und Push werden die Änderungen nicht deployed.
@@ -110,11 +110,54 @@ public class PromptBuilder {
                 %s
                 %s
                 """.formatted(
+                repoRegeln,
                 task.getTitle(),
                 task.getDescription().isBlank() ? "(keine Beschreibung angegeben)" : task.getDescription(),
                 akSection
         );
     }
+
+    // ── Repo-Abschnitte ───────────────────────────────────────────────────────
+
+    /**
+     * Hinweis für den Analyse-Prompt: welche Repos es gibt und wo sie liegen.
+     */
+    private String buildRepoHinweis() {
+        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+        if (repos.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder(
+                "Die folgenden Repositories gehören zum Projektverbund – suche in allen nach relevantem Code:\n");
+        for (AppProperties.ClaudeCode.Repo repo : repos) {
+            sb.append("- **").append(repo.getName()).append("**: `").append(repo.getPath()).append("`\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Regeln für den Implementierungs-Prompt: alle Repos prüfen, kein vorzeitiges Fertig.
+     */
+    private String buildRepoRegeln() {
+        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+        if (repos.isEmpty()) {
+            return "- Lies zuerst die relevanten Dateien, bevor du Änderungen vornimmst";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("- Lies zuerst die relevanten Dateien in ALLEN Repos des Projektverbunds:\n");
+        for (AppProperties.ClaudeCode.Repo repo : repos) {
+            sb.append("    * **").append(repo.getName()).append("**: `").append(repo.getPath()).append("`\n");
+        }
+        sb.append("- Prüfe für jedes Repo explizit, ob dort Änderungen nötig sind. ")
+          .append("Wenn ein Repo nicht betroffen ist, begründe kurz warum. ")
+          .append("Schließe kein Repo ohne Prüfung aus.\n");
+        sb.append("- \"Der Code ist bereits implementiert\" ist nur dann gültig, wenn du ")
+          .append("den Code in ALLEN Repos gelesen und geprüft hast.");
+
+        return sb.toString();
+    }
+
+    // ── Akzeptanzkriterien ────────────────────────────────────────────────────
 
     private String buildAkzeptanzkriterienSection(InternalTask task) {
         if (task.getAkzeptanzkriterien().isEmpty()) {

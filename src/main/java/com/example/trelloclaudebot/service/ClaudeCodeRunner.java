@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -339,9 +340,22 @@ public class ClaudeCodeRunner {
         return new RunResult(message, "", 0, 0, 0, 0.0, true, false);
     }
 
-    // ── Kontext-Datei ─────────────────────────────────────────────────────────
+    // ── Kontext-Aufbau ────────────────────────────────────────────────────────
 
+    /**
+     * Baut den vollständigen Prompt auf:
+     * 1. Liest CLAUDE.md aus jedem konfigurierten Repo (falls vorhanden)
+     * 2. Fällt auf eine einzelne contextFile zurück, wenn keine Repos konfiguriert sind
+     * 3. Stellt den kombinierten Kontext dem eigentlichen Prompt voran
+     */
     private String buildFullPrompt(String prompt) {
+        List<AppProperties.ClaudeCode.Repo> repos = props.getClaudeCode().getRepos();
+
+        if (!repos.isEmpty()) {
+            return buildRepoContext(repos) + prompt;
+        }
+
+        // Fallback: einzelne Kontext-Datei
         String contextFile = props.getClaudeCode().getContextFile();
         if (contextFile == null || contextFile.isBlank()) {
             return prompt;
@@ -359,5 +373,46 @@ public class ClaudeCodeRunner {
             log.warn("ClaudeCodeRunner: Kontext-Datei '{}' konnte nicht gelesen werden.", contextFile, e);
             return prompt;
         }
+    }
+
+    /**
+     * Liest die CLAUDE.md aus jedem konfigurierten Repo und kombiniert sie
+     * zu einem einzigen Kontext-Block, der dem Prompt vorangestellt wird.
+     */
+    private String buildRepoContext(List<AppProperties.ClaudeCode.Repo> repos) {
+        StringBuilder context = new StringBuilder();
+        int loaded = 0;
+
+        for (AppProperties.ClaudeCode.Repo repo : repos) {
+            if (repo.getPath() == null || repo.getPath().isBlank()) continue;
+
+            Path claudeMd = Paths.get(repo.getPath(), "CLAUDE.md");
+            if (!Files.exists(claudeMd)) {
+                log.debug("ClaudeCodeRunner: Kein CLAUDE.md in '{}' ({}) – übersprungen.",
+                        repo.getName(), repo.getPath());
+                continue;
+            }
+            try {
+                String content = Files.readString(claudeMd, StandardCharsets.UTF_8).strip();
+                context.append("# Kontext: ").append(repo.getName())
+                       .append(" (").append(repo.getPath()).append(")\n\n");
+                context.append(content).append("\n\n---\n\n");
+                log.debug("ClaudeCodeRunner: CLAUDE.md aus '{}' geladen ({} Zeichen).",
+                        repo.getName(), content.length());
+                loaded++;
+            } catch (IOException e) {
+                log.warn("ClaudeCodeRunner: CLAUDE.md aus '{}' konnte nicht gelesen werden.",
+                        repo.getName(), e);
+            }
+        }
+
+        if (loaded > 0) {
+            log.info("ClaudeCodeRunner: Kontext aus {} Repo(s) geladen: {}",
+                    loaded, repos.stream().map(AppProperties.ClaudeCode.Repo::getName).toList());
+        } else {
+            log.warn("ClaudeCodeRunner: Keine CLAUDE.md in konfigurierten Repos gefunden.");
+        }
+
+        return context.toString();
     }
 }
