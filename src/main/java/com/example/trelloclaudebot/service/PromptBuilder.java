@@ -79,7 +79,15 @@ public class PromptBuilder {
                 und implementiere dann die folgende Aufgabe vollständig und produktionsreif.
 
                 Regeln:
-                - Lies zuerst die relevanten Dateien, bevor du Änderungen vornimmst
+                - Lies zuerst die relevanten Dateien in ALLEN betroffenen Projekten (Backend, Frontend, Desktop), \
+                bevor du Änderungen vornimmst. Das Projekt besteht aus mehreren Repos – prüfe jeden Layer.
+                - Bei Aufgaben mit Anzeige/UI-Bezug (Wörter wie "anzeigen", "anzeige", "Oberfläche", \
+                "Frontend", "Komponente", "View", "UI"): Prüfe zwingend das FM-Frontend-Repo \
+                (Angular-Komponenten, Services, Templates). Backend-Änderungen allein reichen nicht.
+                - Prüfe für jedes Repo explizit, ob dort Änderungen nötig sind. Wenn ein Repo nicht \
+                betroffen ist, begründe kurz warum. Schließe kein Repo ohne Prüfung aus.
+                - "Der Code ist bereits implementiert" ist nur dann gültig, wenn du den Code in ALLEN \
+                betroffenen Repos gelesen und geprüft hast – Backend UND Frontend UND Desktop (falls relevant).
                 - Halte dich an den bestehenden Code-Stil und die vorhandene Architektur
                 - Schreibe keinen Pseudocode und keine Platzhalter – der Code muss direkt lauffähig sein
                 - Alle Akzeptanzkriterien müssen erfüllt sein bevor du fertig bist
@@ -87,10 +95,10 @@ public class PromptBuilder {
                 für Maven, `dotnet build` für .NET, `./gradlew compileJava` für Gradle). \
                 Schlägt der Build fehl, behebe den Fehler bevor du weitermachst oder abschließt. \
                 Liefere keinen Code ab, der nicht kompiliert.
-                - Committe und pushe deine Änderungen am Ende in jedem betroffenen Projekt: \
-                `git add -A && git commit -m "<kurze Beschreibung der Änderung>" && git push`. \
+                - Committe und pushe deine Änderungen am Ende in jedem betroffenen Projekt separat: \
+                `cd <projekt-pfad> && git add -A && git commit -m "<kurze Beschreibung>" && git push`. \
                 Ohne Commit und Push werden die Änderungen nicht deployed.
-                - Fasse am Ende kurz zusammen, was du geändert hast (max. 5 Bullet Points)
+                - Fasse am Ende kurz zusammen, was du in welchem Repo geändert hast (max. 5 Bullet Points)
 
                 ---
 
