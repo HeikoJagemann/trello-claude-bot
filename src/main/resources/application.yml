@@ -21,10 +21,10 @@ app:
     repos:                                                    # alle Repos des Projektverbunds
       - name: FM-Backend
         path: ${FM_BACKEND_PATH:D:/git/FM-Backend}
-      - name: FM-Frontend
-        path: ${FM_FRONTEND_PATH:D:/git/FM-Frontend}
       - name: FM-Desktop
         path: ${FM_DESKTOP_PATH:D:/git/FM-Desktop}
+      - name: FM-Editor
+        path: ${FM_EDITOR_PATH:D:/git/FM-Editor}
     context-file: ${CLAUDE_CODE_CONTEXT_FILE:}   # Fallback: einzelne Kontext-Datei (wenn keine repos konfiguriert)
     timeout-minutes: 30                           # maximale Laufzeit pro Claude-Code-Aufruf
     max-retries: 5                                # maximale Wiederholungsversuche bei unvollständigem Ergebnis
