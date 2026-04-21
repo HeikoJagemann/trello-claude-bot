@@ -1,0 +1,23 @@
+# Kopiere diese Datei nach application-local.yml und trage deine Werte ein.
+# application-local.yml ist in .gitignore und wird nicht committed.
+
+app:
+  trello:
+    api-key: DEIN_TRELLO_API_KEY
+    api-token: DEIN_TRELLO_API_TOKEN
+    board-id: DEINE_BOARD_ID
+    backlog-list-name: Backlog
+    refinement-label-name: Refinement
+    ready-label-name: Refined
+    story-points-field-name: Story Points
+    sprint-list-name: Sprint
+    bugs-list-name: Bugs
+    qa-list-name: QA
+
+  claude-code:
+    repo-path: C:/pfad/zu/hauptrepo
+    repos:
+      - name: MeinBackend
+        path: C:/pfad/zu/backend
+      - name: MeinFrontend
+        path: C:/pfad/zu/frontend
