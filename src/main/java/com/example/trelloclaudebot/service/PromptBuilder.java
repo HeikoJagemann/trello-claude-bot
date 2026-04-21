@@ -20,16 +20,28 @@ public class PromptBuilder {
                 Analysiere die folgende Aufgabe aus dem Backlog und erstelle eine strukturierte \
                 Aufwandsschätzung. Antworte ausschließlich auf Deutsch.
 
-                WICHTIG: Deine Antwort besteht ausschließlich aus einem einzigen JSON-Objekt. \
+                WICHTIG – CODEANALYSE ZUERST:
+                Bevor du die Aufwandsschätzung erstellst, verschaffe dir einen Überblick über den \
+                tatsächlichen Code. Nutze deine Tools (Glob, Grep, Read), um die relevanten Dateien \
+                zu finden und zu lesen. Mache keine Annahmen über vorhandene Klassen, Methoden oder \
+                Datenstrukturen – prüfe sie direkt im Code.
+                Typische Sucheinstiege:
+                - Grep nach dem Schlüsselbegriff aus dem Kartentitel (z.B. Entitätsname, Feature-Name)
+                - Read der gefundenen Controller, Services, DTOs und Komponenten
+                - Bei Frontend-Aufgaben: Angular-Komponenten und Services lesen
+                Nur auf Basis des tatsächlichen Codes schätze Aufwand und formuliere Akzeptanzkriterien.
+
+                WICHTIG – AUSGABE:
+                Deine Antwort besteht ausschließlich aus einem einzigen JSON-Objekt. \
                 Kein Text davor oder danach, keine Erklärung, kein Markdown außer dem JSON selbst.
 
                 JSON-FORMAT (exakt, keine Abweichung):
                 {
                   "storyPoints": <Ganzzahl aus der Fibonacci-Folge: 1, 2, 3, 5, 8, 13 oder 21>,
-                  "analyse": "<2–4 Sätze: Was ist die Aufgabe, was ist der Kontext?>",
-                  "begruendung": "<Warum diese Punktzahl? Welche Faktoren bestimmen den Aufwand?>",
+                  "analyse": "<2–4 Sätze: Was ist die Aufgabe, was ist der Kontext? Bezug auf den tatsächlichen Code nehmen.>",
+                  "begruendung": "<Warum diese Punktzahl? Welche konkreten Änderungen sind nötig (Klassen, Dateien, Methoden)?>",
                   "akzeptanzkriterien": [
-                    "<Kriterium 1>",
+                    "<Kriterium 1 – konkret und testbar>",
                     "<Kriterium 2>",
                     "<Kriterium 3>"
                   ],

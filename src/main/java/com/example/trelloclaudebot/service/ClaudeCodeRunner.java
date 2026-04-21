@@ -78,7 +78,7 @@ public class ClaudeCodeRunner {
         log.info("ClaudeCodeRunner: Resume Session '{}' für Karte '{}'", sessionId, task.getCardId());
         return execute(task, continuationPrompt,
                 new ProcessBuilder("claude", "--resume", sessionId,
-                        "-p", "--dangerously-skip-permissions", "--output-format", "stream-json"));
+                        "-p", "--verbose", "--dangerously-skip-permissions", "--output-format", "stream-json"));
     }
 
     /**
@@ -86,7 +86,7 @@ public class ClaudeCodeRunner {
      */
     public RunResult run(InternalTask task, String prompt) {
         ProcessBuilder pb = new ProcessBuilder(
-                "claude", "-p", "--dangerously-skip-permissions", "--output-format", "stream-json");
+                "claude", "-p", "--verbose", "--dangerously-skip-permissions", "--output-format", "stream-json");
         return execute(task, buildFullPrompt(prompt), pb);
     }
 
